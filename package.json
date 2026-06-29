@@ -1,0 +1,14 @@
+{
+  "name": "site-management-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace @site-management/web run dev",
+    "build:web": "npm --workspace @site-management/web run build",
+    "preview:web": "npm --workspace @site-management/web run preview",
+    "typecheck:web": "npm --workspace @site-management/web run typecheck"
+  }
+}
