@@ -9,6 +9,16 @@
     "dev:web": "npm --workspace @site-management/web run dev",
     "build:web": "npm --workspace @site-management/web run build",
     "preview:web": "npm --workspace @site-management/web run preview",
-    "typecheck:web": "npm --workspace @site-management/web run typecheck"
+    "typecheck:web": "npm --workspace @site-management/web run typecheck",
+    "dev:api": "npm --workspace @site-management/api run dev",
+    "build:api": "npm --workspace @site-management/api run build",
+    "start:api": "npm --workspace @site-management/api run start",
+    "test:api": "npm --workspace @site-management/api run test",
+    "typecheck:api": "npm --workspace @site-management/api run typecheck",
+    "db:generate": "npm --workspace @site-management/api run prisma:generate",
+    "db:migrate": "npm --workspace @site-management/api run prisma:migrate",
+    "db:seed": "npm --workspace @site-management/api run prisma:seed",
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml down"
   }
 }

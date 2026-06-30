@@ -1,0 +1,350 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  admin
+  supervisor
+  contractor_manager
+  rectifier
+}
+
+enum OrganizationType {
+  owner
+  supervisor
+  contractor
+  other
+}
+
+enum SiteItemType {
+  defect
+  punch
+}
+
+enum SiteItemStatus {
+  pending_approval
+  dispatched
+  rectifying
+  pending_acceptance
+  closed
+  voided
+}
+
+enum Severity {
+  normal
+  important
+  severe
+}
+
+enum PhotoStage {
+  discovery
+  rectification
+  review
+}
+
+enum WorkflowAction {
+  create
+  dispatch
+  assign_rectifier
+  start_rectify
+  submit_review
+  return_rectification
+  close
+  void
+  reopen
+  comment
+}
+
+enum NotificationType {
+  assigned
+  review_requested
+  due_soon
+  overdue
+  voided
+  reopened
+}
+
+enum ExportType {
+  excel
+  photo_package
+  pdf
+}
+
+enum ExportStatus {
+  queued
+  running
+  succeeded
+  failed
+}
+
+model Project {
+  id            String         @id @default(uuid())
+  name          String
+  code          String         @unique
+  sections      Section[]
+  organizations Organization[]
+  users         User[]
+  areas         Area[]
+  disciplines   Discipline[]
+  drawings      Drawing[]
+  siteItems     SiteItem[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model Section {
+  id         String             @id @default(uuid())
+  projectId  String
+  project    Project            @relation(fields: [projectId], references: [id])
+  name       String
+  code       String
+  isActive   Boolean            @default(true)
+  userScopes UserSectionScope[]
+  siteItems  SiteItem[]
+
+  @@unique([projectId, code])
+}
+
+model Organization {
+  id            String             @id @default(uuid())
+  projectId     String
+  project       Project            @relation(fields: [projectId], references: [id])
+  name          String
+  type          OrganizationType
+  isActive      Boolean            @default(true)
+  users         User[]
+  siteItems     SiteItem[]          @relation("ResponsibleOrganization")
+
+  @@unique([projectId, name])
+}
+
+model User {
+  id             String             @id @default(uuid())
+  projectId      String
+  project        Project            @relation(fields: [projectId], references: [id])
+  organizationId String
+  organization   Organization       @relation(fields: [organizationId], references: [id])
+  name           String
+  phone          String             @unique
+  username       String             @unique
+  passwordHash   String
+  role           Role
+  isActive       Boolean            @default(true)
+  sectionScopes  UserSectionScope[]
+  createdItems   SiteItem[]         @relation("CreatedItems")
+  ownedItems     SiteItem[]         @relation("OwnedItems")
+  assignedItems  SiteItem[]         @relation("ResponsibleUser")
+  uploadedPhotos PhotoAttachment[]  @relation("UploadedPhotos")
+  workflowLogs   WorkflowLog[]
+  notifications  Notification[]
+  exportJobs     ExportJob[]
+  auditLogs      AuditLog[]
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+}
+
+model UserSectionScope {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  sectionId String
+  section   Section  @relation(fields: [sectionId], references: [id])
+
+  @@unique([userId, sectionId])
+}
+
+model Area {
+  id        String     @id @default(uuid())
+  projectId String
+  project   Project    @relation(fields: [projectId], references: [id])
+  parentId  String?
+  parent    Area?      @relation("AreaTree", fields: [parentId], references: [id])
+  children  Area[]     @relation("AreaTree")
+  name      String
+  code      String
+  isActive  Boolean    @default(true)
+  drawings  Drawing[]
+  siteItems SiteItem[]
+
+  @@unique([projectId, code])
+}
+
+model Discipline {
+  id        String     @id @default(uuid())
+  projectId String
+  project   Project    @relation(fields: [projectId], references: [id])
+  name      String
+  code      String
+  isActive  Boolean    @default(true)
+  drawings  Drawing[]
+  siteItems SiteItem[]
+
+  @@unique([projectId, code])
+}
+
+model Drawing {
+  id          String            @id @default(uuid())
+  projectId   String
+  project     Project           @relation(fields: [projectId], references: [id])
+  areaId      String
+  area        Area              @relation(fields: [areaId], references: [id])
+  disciplineId String?
+  discipline Discipline?        @relation(fields: [disciplineId], references: [id])
+  name        String
+  code        String
+  isActive    Boolean           @default(true)
+  revisions   DrawingRevision[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([projectId, code])
+}
+
+model DrawingRevision {
+  id              String                @id @default(uuid())
+  drawingId        String
+  drawing          Drawing               @relation(fields: [drawingId], references: [id])
+  revisionNo       String
+  fileKey          String
+  coverPreviewKey  String
+  pageCount        Int
+  uploadedBy       String
+  uploadedAt       DateTime              @default(now())
+  isCurrent        Boolean               @default(false)
+  pages            DrawingRevisionPage[]
+}
+
+model DrawingRevisionPage {
+  id                String          @id @default(uuid())
+  drawingRevisionId  String
+  drawingRevision    DrawingRevision @relation(fields: [drawingRevisionId], references: [id])
+  pageNumber         Int
+  previewKey         String
+  width              Int
+  height             Int
+
+  @@unique([drawingRevisionId, pageNumber])
+}
+
+model SiteItem {
+  id                   String            @id @default(uuid())
+  projectId            String
+  project              Project           @relation(fields: [projectId], references: [id])
+  sectionId            String
+  section              Section           @relation(fields: [sectionId], references: [id])
+  itemNo               String            @unique
+  type                 SiteItemType
+  status               SiteItemStatus
+  severity             Severity
+  title                String
+  description          String
+  areaId               String
+  area                 Area              @relation(fields: [areaId], references: [id])
+  disciplineId         String
+  discipline           Discipline        @relation(fields: [disciplineId], references: [id])
+  locationText         String
+  responsibleOrgId     String?
+  responsibleOrg       Organization?     @relation("ResponsibleOrganization", fields: [responsibleOrgId], references: [id])
+  responsibleUserId    String?
+  responsibleUser      User?             @relation("ResponsibleUser", fields: [responsibleUserId], references: [id])
+  createdBy            String
+  creator              User              @relation("CreatedItems", fields: [createdBy], references: [id])
+  ownerUserId          String
+  owner                User              @relation("OwnedItems", fields: [ownerUserId], references: [id])
+  defaultDueAt         DateTime
+  dueAt                DateTime
+  submittedForReviewAt DateTime?
+  closedAt             DateTime?
+  reopenedAt           DateTime?
+  voidedAt             DateTime?
+  photos               PhotoAttachment[]
+  workflowLogs         WorkflowLog[]
+  notifications        Notification[]
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+}
+
+model PhotoAttachment {
+  id                     String      @id @default(uuid())
+  siteItemId              String?
+  siteItem                SiteItem?   @relation(fields: [siteItemId], references: [id])
+  stage                   PhotoStage?
+  objectKey               String      @unique
+  thumbnailKey            String
+  fileName                String
+  mimeType                String
+  sizeBytes               Int
+  uploadedBy              String
+  uploader                User        @relation("UploadedPhotos", fields: [uploadedBy], references: [id])
+  uploadedAt              DateTime    @default(now())
+  deletedAt               DateTime?
+  sectionSnapshot         String?
+  areaSnapshot            String?
+  disciplineSnapshot      String?
+  responsibleOrgSnapshot  String?
+}
+
+model WorkflowLog {
+  id          String           @id @default(uuid())
+  siteItemId  String
+  siteItem    SiteItem         @relation(fields: [siteItemId], references: [id])
+  action      WorkflowAction
+  fromStatus  SiteItemStatus?
+  toStatus    SiteItemStatus?
+  comment     String
+  actorId     String
+  actor       User             @relation(fields: [actorId], references: [id])
+  createdAt   DateTime         @default(now())
+}
+
+model Notification {
+  id          String            @id @default(uuid())
+  recipientId String
+  recipient   User              @relation(fields: [recipientId], references: [id])
+  siteItemId  String?
+  siteItem    SiteItem?         @relation(fields: [siteItemId], references: [id])
+  type        NotificationType
+  title       String
+  content     String
+  readAt      DateTime?
+  createdAt   DateTime          @default(now())
+}
+
+model ExportJob {
+  id          String       @id @default(uuid())
+  type        ExportType
+  status      ExportStatus
+  requestedBy String
+  requester   User         @relation(fields: [requestedBy], references: [id])
+  createdAt   DateTime     @default(now())
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  actorId      String
+  actor        User     @relation(fields: [actorId], references: [id])
+  action       String
+  resourceType String
+  resourceId   String
+  metadata     Json?
+  createdAt    DateTime @default(now())
+}
+
+model IdempotencyRecord {
+  id             String   @id @default(uuid())
+  actorId        String
+  method         String
+  path           String
+  key            String
+  requestHash    String
+  responseStatus Int
+  responseBody   Json
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+
+  @@unique([actorId, method, path, key])
+}
