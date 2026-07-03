@@ -20,4 +20,8 @@ export class AuthApi {
   logout(): Promise<{ ok: true }> {
     return this.client.post<{ ok: true }>("/auth/logout");
   }
+
+  changePassword(input: { currentPassword: string; newPassword: string }): Promise<{ ok: true }> {
+    return this.client.post<{ ok: true }>("/auth/change-password", input);
+  }
 }

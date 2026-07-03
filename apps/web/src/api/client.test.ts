@@ -1,6 +1,7 @@
 import { deepEqual, equal, rejects } from "node:assert/strict";
 import { test } from "node:test";
 import { ApiClient, ApiError } from "./client.js";
+import { AuthApi } from "./auth.js";
 import { ExportsApi } from "./exports.js";
 import { createIdempotencyKey, IdempotencyKeyStore } from "./idempotency.js";
 import { readFrontendConfig } from "./env.js";
@@ -81,6 +82,25 @@ test("api client clears token and calls unauthorized handler on 401", async () =
   await rejects(() => client.get("/auth/me"), { status: 401 });
   equal(readStoredToken(storage), null);
   equal(unauthorized, true);
+});
+
+test("auth api maps change password route", async () => {
+  let captured: { url: string; init: RequestInit } | undefined;
+  const client = new ApiClient({
+    baseUrl: "http://api.local",
+    fetchImpl: async (url, init) => {
+      captured = { url: String(url), init: init ?? {} };
+      return jsonResponse(200, { data: { ok: true } });
+    }
+  });
+  const authApi = new AuthApi(client);
+
+  const result = await authApi.changePassword({ currentPassword: "old-password", newPassword: "new-password-1" });
+
+  equal(result.ok, true);
+  equal(captured?.url, "http://api.local/auth/change-password");
+  equal(captured?.init.method, "POST");
+  equal(captured?.init.body, JSON.stringify({ currentPassword: "old-password", newPassword: "new-password-1" }));
 });
 
 test("idempotency helpers create stable keys for retries", () => {

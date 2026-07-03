@@ -910,6 +910,31 @@ function useAppState() {
     }
   }
 
+  async function changePassword(currentPassword: string, newPassword: string): Promise<boolean> {
+    if (!currentPassword || !newPassword) {
+      setDataError("请输入当前密码和新密码。");
+      return false;
+    }
+    if (newPassword.length < 8) {
+      setDataError("新密码至少需要 8 个字符。");
+      return false;
+    }
+    if (runtimeConfig.useMocks) {
+      setDataError(null);
+      await logout();
+      return true;
+    }
+    try {
+      await authApi.changePassword({ currentPassword, newPassword });
+      setDataError(null);
+      await logout();
+      return true;
+    } catch (error) {
+      setDataError(errorMessage(error));
+      return false;
+    }
+  }
+
   useEffect(() => {
     if (runtimeConfig.useMocks || authStatus !== "authenticated" || !currentUser) return;
     void refreshSiteItems();
@@ -1359,6 +1384,7 @@ function useAppState() {
     authError,
     login,
     logout,
+    changePassword,
     items,
     setItems,
     photos,
@@ -2601,8 +2627,53 @@ function ProfilePage({ state, user }: { state: AppState; user: User }) {
             <span>{formatDate(draft.savedAt)} · {draft.selectedPhotoIds?.length || 0} 张照片</span>
           </button>
         ))}
-        <div className="list-row">修改密码 <span>占位</span></div>
+        <PasswordChangeForm state={state} />
       </Card>
+    </div>
+  );
+}
+
+function PasswordChangeForm({ state }: { state: AppState }) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  async function submit() {
+    if (newPassword !== confirmPassword) {
+      setLocalError("两次输入的新密码不一致。");
+      return;
+    }
+    if (newPassword.length < 8) {
+      setLocalError("新密码至少需要 8 个字符。");
+      return;
+    }
+    setSubmitting(true);
+    setLocalError(null);
+    const changed = await state.changePassword(currentPassword, newPassword);
+    if (!changed) {
+      setSubmitting(false);
+    }
+  }
+  return (
+    <div className="inline-editor">
+      <h3>修改密码</h3>
+      <div className="form-grid">
+        <Field label="当前密码">
+          <TextInput value={currentPassword} type="password" onChange={(event) => setCurrentPassword(event.target.value)} />
+        </Field>
+        <Field label="新密码">
+          <TextInput value={newPassword} type="password" onChange={(event) => setNewPassword(event.target.value)} />
+        </Field>
+        <Field label="确认新密码">
+          <TextInput value={confirmPassword} type="password" onChange={(event) => setConfirmPassword(event.target.value)} />
+        </Field>
+      </div>
+      {localError ? <p className="error-text">{localError}</p> : null}
+      {state.dataError ? <p className="error-text">{state.dataError}</p> : null}
+      <Button type="button" variant="secondary" disabled={submitting || !currentPassword || !newPassword || !confirmPassword} onClick={() => void submit()}>
+        {submitting ? "提交中" : "确认修改"}
+      </Button>
     </div>
   );
 }

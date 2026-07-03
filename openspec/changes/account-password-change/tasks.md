@@ -6,9 +6,9 @@
 
 ## 2. Frontend Profile Integration
 
-- [ ] 2.1 Add typed frontend auth API method for password change.
-- [ ] 2.2 Replace the profile password placeholder with an inline change-password form, local confirmation validation, backend error display, and logout-after-success behavior.
-- [ ] 2.3 Add frontend client tests for the password-change endpoint wiring.
+- [x] 2.1 Add typed frontend auth API method for password change.
+- [x] 2.2 Replace the profile password placeholder with an inline change-password form, local confirmation validation, backend error display, and logout-after-success behavior.
+- [x] 2.3 Add frontend client tests for the password-change endpoint wiring.
 
 ## 3. Documentation And Verification
 
