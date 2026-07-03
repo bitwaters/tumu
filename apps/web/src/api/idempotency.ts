@@ -1,4 +1,4 @@
-export type IdempotencyScope = "create" | "workflow" | "comment" | "photo-complete" | "delete" | "admin-write";
+export type IdempotencyScope = "create" | "update" | "workflow" | "comment" | "photo-complete" | "delete" | "admin-write";
 
 export function createIdempotencyKey(scope: IdempotencyScope, entropy = randomId()): string {
   return `${scope}:${entropy}`;

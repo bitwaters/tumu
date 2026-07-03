@@ -7,7 +7,7 @@ import { IdempotencyKeyStore } from "./api/idempotency";
 import { MasterDataApi, type MasterDataPayload } from "./api/masterData";
 import { NotificationsApi } from "./api/notifications";
 import { PhotosApi, type PhotoCompleteInput, type PhotoListQuery } from "./api/photos";
-import { SiteItemsApi, flattenGroupedPhotos, type CreateSiteItemInput, type SiteItemDetailPayload, type SiteItemListQuery, type SiteItemWorkflowInput } from "./api/siteItems";
+import { SiteItemsApi, flattenGroupedPhotos, type CreateSiteItemInput, type SiteItemDetailPayload, type SiteItemListQuery, type SiteItemWorkflowInput, type UpdateSiteItemInput } from "./api/siteItems";
 import { clearStoredToken, readStoredToken, saveStoredToken } from "./api/session";
 import { UsersApi } from "./api/users";
 import {
@@ -214,6 +214,12 @@ function activeRectifiersForDirectory(directory: DirectoryData, organizationId: 
       user.isActive &&
       (!sectionId || user.sectionScopeIds.includes(sectionId))
   );
+}
+
+function canEditSiteItem(user: User, item: SiteItem): boolean {
+  if (item.status === "closed" || item.status === "voided") return false;
+  if (user.role !== "admin" && !user.sectionScopeIds.includes(item.sectionId)) return false;
+  return user.role === "admin" || user.role === "supervisor" || item.ownerUserId === user.id || item.createdBy === user.id;
 }
 
 function visibleDesktopTabs(user: User) {
@@ -597,6 +603,50 @@ function useAppState() {
     });
   }
 
+  async function updateItem(item: SiteItem, values: UpdateSiteItemInput, requestKey: string): Promise<boolean> {
+    if (!currentUser || !canEditSiteItem(currentUser, item)) return false;
+    const input: UpdateSiteItemInput = {
+      type: values.type,
+      severity: values.severity,
+      title: values.title,
+      description: values.description,
+      sectionId: values.sectionId,
+      areaId: values.areaId,
+      disciplineId: values.disciplineId,
+      locationText: values.locationText,
+      dueAt: values.dueAt
+    };
+    if (!runtimeConfig.useMocks) {
+      const actionId = `update:${item.id}:${item.updatedAt}:${JSON.stringify(input)}`;
+      const key = apiIdempotencyKeys.current.get(actionId, "update");
+      try {
+        const detail = await siteItemsApi.update(item.id, input, key);
+        apiIdempotencyKeys.current.clear(actionId);
+        mergeItemDetail(detail);
+        setDataError(null);
+        void refreshSiteItems();
+        return true;
+      } catch (error) {
+        setDataError(errorMessage(error));
+        void refreshItemDetail(item.id);
+        return false;
+      }
+    }
+    setItems((prev) =>
+      prev.map((candidate) =>
+        candidate.id === item.id
+          ? {
+              ...candidate,
+              ...input,
+              updatedAt: new Date().toISOString()
+            }
+          : candidate
+      )
+    );
+    setDataError(null);
+    return true;
+  }
+
   function openCreateItem() {
     if (!currentUser || !canCreateItem(currentUser)) return;
     setSelectedItemId(null);
@@ -964,6 +1014,7 @@ function useAppState() {
     openCreateItem,
     openDraft,
     createItemFromForm,
+    updateItem,
     saveDraft,
     applyWorkflow,
     bindPhotosToItem,
@@ -1566,6 +1617,7 @@ function PhotoPickerPage({
 
 function ItemDetailPage({ state, user, item }: { state: AppState; user: User; item: SiteItem }) {
   const actions = allowedItemActions(state, user, item);
+  const canEdit = canEditSiteItem(user, item);
   const canComment = actions.includes("comment");
   const workflowActions = actions.filter((action) => action !== "comment");
   const [selectedReviewPhotoIds, setSelectedReviewPhotoIds] = useState<string[]>([]);
@@ -1573,6 +1625,7 @@ function ItemDetailPage({ state, user, item }: { state: AppState; user: User; it
   const [selectedClosePhotoIds, setSelectedClosePhotoIds] = useState<string[]>([]);
   const [isPickingClosePhotos, setIsPickingClosePhotos] = useState(false);
   const [isCommenting, setIsCommenting] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [previewPhoto, setPreviewPhoto] = useState<PhotoAttachment | null>(null);
   const availableReviewPhotos = state.galleryPhotos
@@ -1666,26 +1719,33 @@ function ItemDetailPage({ state, user, item }: { state: AppState; user: User; it
       <div className="detail-layout">
         <div className="detail-main">
           <Card className="detail-summary-card">
-            <div className="detail-head">
-              <StatusTag status={item.status} />
-              <TimingTag overdue={isOverdue(item)} dueSoon={isDueSoon(item)} />
-              <SeverityTag severity={item.severity} />
-              <span>{typeText[item.type]}</span>
-            </div>
-            <div className="detail-description">
-              <span>问题描述</span>
-              <p>{item.description || "暂无描述"}</p>
-            </div>
-            <dl className="detail-grid">
-              <div><dt>标段</dt><dd>{getSection(item.sectionId)?.name}</dd></div>
-              <div><dt>区域</dt><dd>{getArea(item.areaId)?.name}</dd></div>
-              <div><dt>专业</dt><dd>{getDiscipline(item.disciplineId)?.name}</dd></div>
-              <div><dt>提出人</dt><dd>{getUser(item.createdBy)?.name}</dd></div>
-              <div><dt>责任工程师</dt><dd>{getUser(item.ownerUserId)?.name}</dd></div>
-              <div><dt>责任单位</dt><dd>{getOrganization(item.responsibleOrgId)?.name || "待责任工程师派发"}</dd></div>
-              <div><dt>责任人</dt><dd>{getUser(item.responsibleUserId)?.name || "待分配"}</dd></div>
-              <div><dt>截止</dt><dd>{formatDate(item.dueAt)}</dd></div>
-            </dl>
+            {isEditing ? (
+              <ItemEditForm item={item} state={state} user={user} onCancel={() => setIsEditing(false)} onSaved={() => setIsEditing(false)} />
+            ) : (
+              <>
+                <div className="detail-head">
+                  <StatusTag status={item.status} />
+                  <TimingTag overdue={isOverdue(item)} dueSoon={isDueSoon(item)} />
+                  <SeverityTag severity={item.severity} />
+                  <span>{typeText[item.type]}</span>
+                  {canEdit ? <Button variant="secondary" onClick={() => setIsEditing(true)}>编辑事项</Button> : null}
+                </div>
+                <div className="detail-description">
+                  <span>问题描述</span>
+                  <p>{item.description || "暂无描述"}</p>
+                </div>
+                <dl className="detail-grid">
+                  <div><dt>标段</dt><dd>{getSection(item.sectionId)?.name}</dd></div>
+                  <div><dt>区域</dt><dd>{getArea(item.areaId)?.name}</dd></div>
+                  <div><dt>专业</dt><dd>{getDiscipline(item.disciplineId)?.name}</dd></div>
+                  <div><dt>提出人</dt><dd>{getUser(item.createdBy)?.name}</dd></div>
+                  <div><dt>责任工程师</dt><dd>{getUser(item.ownerUserId)?.name}</dd></div>
+                  <div><dt>责任单位</dt><dd>{getOrganization(item.responsibleOrgId)?.name || "待责任工程师派发"}</dd></div>
+                  <div><dt>责任人</dt><dd>{getUser(item.responsibleUserId)?.name || "待分配"}</dd></div>
+                  <div><dt>截止</dt><dd>{formatDate(item.dueAt)}</dd></div>
+                </dl>
+              </>
+            )}
           </Card>
           <Card className="photo-evidence-card">
             <h3>照片证据</h3>
@@ -1842,6 +1902,103 @@ function ItemDetailPage({ state, user, item }: { state: AppState; user: User; it
         </aside>
       </div>
       {previewPhoto ? <PhotoPreviewModal state={state} photo={previewPhoto} item={item} onClose={() => setPreviewPhoto(null)} /> : null}
+    </div>
+  );
+}
+
+function ItemEditForm({
+  item,
+  state,
+  user,
+  onCancel,
+  onSaved
+}: {
+  item: SiteItem;
+  state: AppState;
+  user: User;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const directory = state.directory;
+  const scopedSections =
+    user.role === "admin"
+      ? directory.sections
+      : directory.sections.filter((section) => user.sectionScopeIds.includes(section.id));
+  const [requestKey] = useState(() => uniqueId("update-request"));
+  const [values, setValues] = useState<UpdateSiteItemInput>({
+    type: item.type,
+    severity: item.severity,
+    title: item.title,
+    description: item.description,
+    sectionId: item.sectionId,
+    areaId: item.areaId,
+    disciplineId: item.disciplineId,
+    locationText: item.locationText,
+    dueAt: item.dueAt
+  });
+  const canSave = Boolean(values.sectionId && values.areaId && values.disciplineId && (values.title || "").trim());
+  async function save() {
+    if (!canSave) return;
+    const saved = await state.updateItem(item, values, requestKey);
+    if (saved) onSaved();
+  }
+  return (
+    <div className="stack compact-stack">
+      <div className="card-title-row">
+        <h3>编辑事项</h3>
+        <Button variant="ghost" onClick={onCancel}>取消</Button>
+      </div>
+      <div className="form-grid">
+        <Field label="事项类型">
+          <Select value={values.type} onChange={(event) => setValues({ ...values, type: event.target.value as SiteItem["type"] })}>
+            <option value="defect">缺陷</option>
+            <option value="punch">尾工</option>
+          </Select>
+        </Field>
+        <Field label="严重等级">
+          <Select value={values.severity} onChange={(event) => setValues({ ...values, severity: event.target.value as SiteItem["severity"] })}>
+            <option value="normal">一般</option>
+            <option value="important">重要</option>
+            <option value="severe">严重</option>
+          </Select>
+        </Field>
+        <Field label="标题">
+          <TextInput value={values.title || ""} onChange={(event) => setValues({ ...values, title: event.target.value })} />
+        </Field>
+        <Field label="描述">
+          <TextArea value={values.description || ""} onChange={(event) => setValues({ ...values, description: event.target.value })} />
+        </Field>
+        <Field label="标段">
+          <Select value={values.sectionId} onChange={(event) => setValues({ ...values, sectionId: event.target.value })}>
+            {scopedSections.map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}
+          </Select>
+        </Field>
+        <Field label="区域">
+          <Select value={values.areaId} onChange={(event) => setValues({ ...values, areaId: event.target.value })}>
+            {directory.areas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
+          </Select>
+        </Field>
+        <Field label="专业">
+          <Select value={values.disciplineId} onChange={(event) => setValues({ ...values, disciplineId: event.target.value })}>
+            {directory.disciplines.map((discipline) => <option key={discipline.id} value={discipline.id}>{discipline.name}</option>)}
+          </Select>
+        </Field>
+        <Field label="位置描述">
+          <TextInput value={values.locationText || ""} onChange={(event) => setValues({ ...values, locationText: event.target.value })} />
+        </Field>
+        <Field label="整改截止">
+          <TextInput
+            type="datetime-local"
+            value={toDateTimeLocalInput(values.dueAt)}
+            onChange={(event) => setValues({ ...values, dueAt: fromDateTimeLocalInput(event.target.value) })}
+          />
+        </Field>
+      </div>
+      {state.dataError ? <p className="error-text">{state.dataError}</p> : null}
+      <div className="action-row">
+        <Button variant="secondary" onClick={onCancel}>取消</Button>
+        <Button disabled={!canSave} onClick={save}>保存修改</Button>
+      </div>
     </div>
   );
 }

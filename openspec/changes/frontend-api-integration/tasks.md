@@ -26,7 +26,7 @@
 
 - [x] 4.1 Connect create-item form submission to `POST /site-items` with selected discovery `photoIds` and idempotency key.
 - [x] 4.2 Keep local draft save/restore entirely local and separate from backend item creation.
-- [ ] 4.3 Connect item edit form to `PATCH /site-items/:id` and refresh detail from the response.
+- [x] 4.3 Connect item edit form to `PATCH /site-items/:id` and refresh detail from the response.
 - [x] 4.4 Connect dispatch and assign-rectifier actions to their workflow endpoints with responsibility validation inputs.
 - [x] 4.5 Connect start-rectify, submit-review, close, void, reopen, and comment actions to their workflow endpoints.
 - [x] 4.6 Ensure submit-review and close can bind selected rectification/review photo IDs.
