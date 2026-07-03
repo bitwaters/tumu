@@ -83,7 +83,7 @@ export function buildRouter(store: Store, config: ApiConfig): Router {
     const user = store.users.find((candidate) => (candidate.username === account || candidate.phone === account) && candidate.isActive);
     if (!user || !password || !verifyPassword(password, user.passwordHash)) throw unauthorized("Invalid credentials");
     writeAudit(store, user.id, "login", "User", user.id);
-    return { accessToken: issueToken(user.id, config), user: publicUser(user) };
+    return { accessToken: issueToken(user.id, config, user.passwordHash), user: publicUser(user) };
   });
 
   router.add("POST", "/auth/logout", (request) => {

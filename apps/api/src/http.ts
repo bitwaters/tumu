@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { randomUUID } from "node:crypto";
 import type { ApiConfig } from "./config.js";
 import { HttpError, badRequest, forbidden, notFound, unauthorized } from "./errors.js";
-import { verifyToken } from "./security.js";
+import { stableHash, verifyTokenPayload } from "./security.js";
 import type { RequestContext } from "./authorization.js";
 import type { Store } from "./types.js";
 
@@ -84,9 +84,10 @@ export function authenticate(request: ApiRequest, store: Store, config: ApiConfi
   const header = request.headers.authorization;
   const raw = Array.isArray(header) ? header[0] : header;
   if (!raw?.startsWith("Bearer ")) throw unauthorized();
-  const userId = verifyToken(raw.slice("Bearer ".length), config);
-  const user = store.users.find((candidate) => candidate.id === userId && candidate.isActive);
+  const payload = verifyTokenPayload(raw.slice("Bearer ".length), config);
+  const user = store.users.find((candidate) => candidate.id === payload.sub && candidate.isActive);
   if (!user) throw unauthorized();
+  if (payload.pwd !== stableHash(user.passwordHash)) throw unauthorized();
   const context: RequestContext = {
     user,
     requestId: randomUUID(),

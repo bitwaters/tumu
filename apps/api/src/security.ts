@@ -24,26 +24,35 @@ function sign(data: string, secret: string): string {
   return createHmac("sha256", secret).update(data).digest("base64url");
 }
 
-export function issueToken(userId: string, config: ApiConfig): string {
+export interface TokenPayload {
+  sub: string;
+  pwd?: string;
+}
+
+export function issueToken(userId: string, config: ApiConfig, passwordHash?: string): string {
   const header = encodeJson({ alg: "HS256", typ: "JWT" });
-  const payload = encodeJson({ sub: userId, iat: Math.floor(Date.now() / 1000) });
+  const payload = encodeJson({ sub: userId, iat: Math.floor(Date.now() / 1000), pwd: passwordHash ? stableHash(passwordHash) : undefined });
   const data = `${header}.${payload}`;
   return `${data}.${sign(data, config.jwtSecret)}`;
 }
 
-export function verifyToken(token: string, config: ApiConfig): string {
+export function verifyTokenPayload(token: string, config: ApiConfig): TokenPayload {
   const parts = token.split(".");
   if (parts.length !== 3) throw unauthorized();
   const [header, payload, signature] = parts;
   const expected = sign(`${header}.${payload}`, config.jwtSecret);
   if (signature !== expected) throw unauthorized();
   try {
-    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { sub?: string };
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { sub?: string; pwd?: string };
     if (!parsed.sub) throw unauthorized();
-    return parsed.sub;
+    return { sub: parsed.sub, pwd: parsed.pwd };
   } catch {
     throw unauthorized();
   }
+}
+
+export function verifyToken(token: string, config: ApiConfig): string {
+  return verifyTokenPayload(token, config).sub;
 }
 
 export function stableHash(value: unknown): string {

@@ -2,7 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { ApiConfig } from "./config.js";
 import { badRequest, forbidden, notFound, unauthorized } from "./errors.js";
 import { assertRecord, readString, readStringArray, Router } from "./http.js";
-import { verifyToken } from "./security.js";
+import { hashPassword, stableHash, verifyTokenPayload } from "./security.js";
 import { ObjectStorageClient } from "./storage.js";
 import { AuditRepository } from "./repositories/audit/index.js";
 import { AuthRepository } from "./repositories/auth/index.js";
@@ -36,7 +36,6 @@ import {
   readGeneratedExportArtifact
 } from "./services/import-export/index.js";
 import type { ExportJob, ImportJob, ImportKind, Role, Severity, SiteItem, SiteItemStatus, SiteItemType, User, WorkflowAction } from "./types.js";
-import { hashPassword } from "./security.js";
 
 export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Router {
   const router = new Router();
@@ -67,9 +66,10 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
     const header = request.headers.authorization;
     const raw = Array.isArray(header) ? header[0] : header;
     if (!raw?.startsWith("Bearer ")) throw unauthorized();
-    const userId = verifyToken(raw.slice("Bearer ".length), config);
-    const user = await authRepository.findActiveUserById(userId);
+    const payload = verifyTokenPayload(raw.slice("Bearer ".length), config);
+    const user = await authRepository.findActiveUserById(payload.sub);
     if (!user) throw unauthorized();
+    if (payload.pwd !== stableHash(user.passwordHash)) throw unauthorized();
     return user;
   }
 

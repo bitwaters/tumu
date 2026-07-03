@@ -63,6 +63,7 @@ test("current user can change password with audit trail", async () => {
   )) as { ok: true };
 
   equal(result.ok, true);
+  await rejects(() => request("GET", "/auth/me", undefined, token));
   await rejects(() => login(request, "wang.supervisor", "password123"));
   await login(request, "wang.supervisor", "new-password-1");
   ok(store.auditLogs.some((log) => log.actorId === "u-supervisor" && log.action === "change_password"));

@@ -29,7 +29,7 @@ export class AuthService {
     });
 
     return {
-      accessToken: issueToken(user.id, this.config),
+      accessToken: issueToken(user.id, this.config, user.passwordHash),
       user: mapPublicUser(user)
     };
   }
