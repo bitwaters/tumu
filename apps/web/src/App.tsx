@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ApiClient, ApiError } from "./api/client";
 import { DrawingsApi, type DrawingWithCurrentRevision } from "./api/drawings";
+import { ExportsApi, type ExportDownload } from "./api/exports";
 import { readFrontendConfig, type FrontendRuntimeConfig } from "./api/env";
 import { AuditApi, type AuditLogQuery } from "./api/audit";
 import { AuthApi } from "./api/auth";
@@ -17,6 +18,7 @@ import {
   disciplines,
   drawings,
   exportJobs,
+  importJobs,
   notifications as initialNotifications,
   organizations,
   photos as initialPhotos,
@@ -57,6 +59,9 @@ import type {
   DrawingRevision,
   DrawingRevisionPage,
   DraftItem,
+  ExportJob,
+  ImportJob,
+  ImportKind,
   Notification,
   Organization,
   PhotoAttachment,
@@ -123,7 +128,7 @@ const desktopTabs: Array<RoleScopedTab<DesktopRoute>> = [
   { id: "drawings", label: "图纸管理", roles: ["admin", "supervisor"] },
   { id: "master", label: "基础数据", roles: ["admin"] },
   { id: "users", label: "用户与权限", roles: ["admin"] },
-  { id: "exports", label: "导入导出", roles: ["admin", "supervisor"] },
+  { id: "exports", label: "导入导出", roles: ["admin", "supervisor", "contractor_manager"] },
   { id: "audit", label: "审计日志", roles: ["admin"] },
   { id: "profile", label: "我的工作台" }
 ];
@@ -156,6 +161,23 @@ function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   if (error instanceof Error) return error.message;
   return "操作失败，请稍后重试";
+}
+
+function downloadExportArtifact(download: ExportDownload) {
+  if (download.downloadUrl) {
+    window.open(download.downloadUrl, "_blank", "noopener,noreferrer");
+    return;
+  }
+  if (!download.contentBase64) return;
+  const binary = atob(download.contentBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  const url = URL.createObjectURL(new Blob([bytes], { type: download.mimeType }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = download.fileName;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function upsertById<T extends { id: string }>(items: T[], item: T): T[] {
@@ -270,6 +292,7 @@ function useAppState() {
   const auditApi = useMemo(() => new AuditApi(apiClient), [apiClient]);
   const authApi = useMemo(() => new AuthApi(apiClient), [apiClient]);
   const drawingsApi = useMemo(() => new DrawingsApi(apiClient), [apiClient]);
+  const exportsApi = useMemo(() => new ExportsApi(apiClient), [apiClient]);
   const masterDataApi = useMemo(() => new MasterDataApi(apiClient), [apiClient]);
   const siteItemsApi = useMemo(() => new SiteItemsApi(apiClient), [apiClient]);
   const photosApi = useMemo(() => new PhotosApi(apiClient), [apiClient]);
@@ -295,6 +318,8 @@ function useAppState() {
   const [allowedActionsByItem, setAllowedActionsByItem] = useState<Record<string, WorkflowAction[]>>({});
   const [notifications, setNotifications] = useState<Notification[]>(() => (runtimeConfig.useMocks ? initialNotifications : []));
   const [auditLogRecords, setAuditLogRecords] = useState<AuditLog[]>(() => (runtimeConfig.useMocks ? auditLogs : []));
+  const [exportJobRecords, setExportJobRecords] = useState<ExportJob[]>(() => (runtimeConfig.useMocks ? exportJobs : []));
+  const [importJobRecords, setImportJobRecords] = useState<ImportJob[]>(() => (runtimeConfig.useMocks ? importJobs : []));
   const [drawingRecords, setDrawingRecords] = useState<DrawingWithCurrentRevision[]>(() =>
     runtimeConfig.useMocks ? drawings.map((drawing) => ({ ...drawing, currentRevision: drawing.revisions.find((revision) => revision.isCurrent) })) : []
   );
@@ -442,6 +467,109 @@ function useAppState() {
       setDirectoryState("error");
     }
   }, [authStatus, masterDataApi, runtimeConfig.useMocks, usersApi]);
+
+  const createExportJob = useCallback(
+    async (type: ExportJob["type"], options: { itemId?: string; itemQuery?: SiteItemListQuery; auditQuery?: AuditLogQuery } = {}) => {
+      if (!currentUser || !canExportItemData(currentUser)) return undefined;
+      if (type === "audit" && currentUser.role !== "admin") return undefined;
+      if (type === "pdf" && !options.itemId) {
+        setDataError("请选择要导出的事项。");
+        return undefined;
+      }
+      try {
+        const job = runtimeConfig.useMocks
+          ? {
+              id: uniqueId("export"),
+              type,
+              status: "succeeded" as const,
+              requestedBy: currentUser.id,
+              createdAt: new Date().toISOString(),
+              completedAt: new Date().toISOString(),
+              artifactFileName: `${type}-${Date.now()}.csv`,
+              artifactMimeType: "text/csv; charset=utf-8"
+            }
+          : type === "excel"
+            ? await exportsApi.createSiteItemLedger(options.itemQuery)
+            : type === "photo_package"
+              ? await exportsApi.createPhotoPackage(options.itemQuery)
+              : type === "pdf"
+                ? await exportsApi.createCloseoutPdf(options.itemId!)
+                : await exportsApi.createAuditExport(options.auditQuery);
+        setExportJobRecords((prev) => upsertById(prev, job));
+        setDataError(null);
+        return job;
+      } catch (error) {
+        setDataError(errorMessage(error));
+        return undefined;
+      }
+    },
+    [currentUser, exportsApi, runtimeConfig.useMocks]
+  );
+
+  const downloadExportJob = useCallback(
+    async (jobId: string) => {
+      const job = exportJobRecords.find((candidate) => candidate.id === jobId);
+      if (runtimeConfig.useMocks) {
+        setDataError(null);
+        return;
+      }
+      if (!job || job.status !== "succeeded") return;
+      try {
+        downloadExportArtifact(await exportsApi.downloadExport(jobId));
+        setDataError(null);
+      } catch (error) {
+        setDataError(errorMessage(error));
+      }
+    },
+    [exportJobRecords, exportsApi, runtimeConfig.useMocks]
+  );
+
+  const refreshExportJob = useCallback(
+    async (jobId: string) => {
+      if (runtimeConfig.useMocks) {
+        setDataError(null);
+        return;
+      }
+      try {
+        const job = await exportsApi.getExportJob(jobId);
+        setExportJobRecords((prev) => upsertById(prev, job));
+        setDataError(null);
+      } catch (error) {
+        setDataError(errorMessage(error));
+      }
+    },
+    [exportsApi, runtimeConfig.useMocks]
+  );
+
+  const createImportJob = useCallback(
+    async (kind: ImportKind, csvText: string, sourceFileName?: string) => {
+      if (!currentUser || currentUser.role !== "admin") return undefined;
+      try {
+        const job = runtimeConfig.useMocks
+          ? {
+              id: uniqueId("import"),
+              kind,
+              status: "succeeded" as const,
+              requestedBy: currentUser.id,
+              sourceFileName,
+              acceptedRows: Math.max(csvText.trim().split(/\r?\n/).length - 1, 0),
+              rejectedRows: 0,
+              errors: [],
+              createdAt: new Date().toISOString(),
+              completedAt: new Date().toISOString()
+            }
+          : await exportsApi.createImport(kind, { csvText, sourceFileName }, apiIdempotencyKeys.current.get(`import:${kind}:${sourceFileName ?? "paste"}`, "admin-write"));
+        setImportJobRecords((prev) => upsertById(prev, job));
+        await refreshDirectory();
+        setDataError(null);
+        return job;
+      } catch (error) {
+        setDataError(errorMessage(error));
+        return undefined;
+      }
+    },
+    [currentUser, exportsApi, refreshDirectory, runtimeConfig.useMocks]
+  );
 
   async function createMasterData(kind: MasterDataKind, input: MasterDataWriteInput): Promise<boolean> {
     if (!currentUser || currentUser.role !== "admin") return false;
@@ -1240,6 +1368,8 @@ function useAppState() {
     notifications,
     setNotifications,
     auditLogRecords,
+    exportJobRecords,
+    importJobRecords,
     drawingRecords,
     drawingPagesByRevision,
     drawingPreviewUrls,
@@ -1258,6 +1388,10 @@ function useAppState() {
     loadPhotoPreview,
     refreshNotifications,
     refreshAuditLogs,
+    createExportJob,
+    downloadExportJob,
+    refreshExportJob,
+    createImportJob,
     refreshDirectory,
     createMasterData,
     updateMasterData,
@@ -1497,7 +1631,7 @@ function renderDesktopRoute(state: AppState, user: User) {
   if (route === "drawings") return <DrawingAdmin state={state} user={user} />;
   if (route === "master") return <MasterDataPage state={state} />;
   if (route === "users") return <UsersPage state={state} />;
-  if (route === "exports") return <ExportsPage />;
+  if (route === "exports") return <ExportsPage state={state} user={user} />;
   if (route === "profile") return <ProfilePage state={state} user={user} />;
   return <AuditPage state={state} />;
 }
@@ -2618,7 +2752,7 @@ function DesktopItems({ state, user }: { state: AppState; user: User }) {
         action={(
           <div className="action-row wrap">
             {canCreateItem(user) ? <Button onClick={state.openCreateItem}>新建事项</Button> : null}
-            {canExportItemData(user) ? <Button variant="secondary">导出 Excel</Button> : null}
+            {canExportItemData(user) ? <Button variant="secondary" onClick={() => void state.createExportJob("excel", { itemQuery: siteItemListQuery(filters, query) })}>导出 Excel</Button> : null}
           </div>
         )}
       />
@@ -3299,16 +3433,138 @@ function PasswordResetForm({ state, user, onCancel, onSaved }: { state: AppState
   );
 }
 
-function ExportsPage() {
+function ExportsPage({ state, user }: { state: AppState; user: User }) {
+  const [importKind, setImportKind] = useState<ImportKind>("sections");
+  const [sourceFileName, setSourceFileName] = useState("import.csv");
+  const [csvText, setCsvText] = useState("name,code,isActive\n临时标段,TMP,true");
+  const [pdfItemId, setPdfItemId] = useState("");
+  const canImport = user.role === "admin";
+  const exportableItems = scopedItems(state, user);
+  const pdfTargetId = pdfItemId || exportableItems[0]?.id || "";
+  async function submitImport() {
+    await state.createImportJob(importKind, csvText, sourceFileName.trim() || undefined);
+  }
+  async function readImportFile(file?: File) {
+    if (!file) return;
+    setSourceFileName(file.name);
+    setCsvText(await file.text());
+  }
   return (
     <div className="stack">
-      <PageHeader title="导入导出" meta="台账、照片包、PDF 闭环单任务" action={<Button>新建导出</Button>} />
-      <DataTable
-        columns={["任务", "类型", "状态", "发起人", "创建时间", "下载"]}
-        rows={exportJobs.map((job) => [job.id, job.type, job.status, getUser(job.requestedBy)?.name || "-", formatDate(job.createdAt), job.status === "succeeded" ? "下载" : "-"])}
+      <PageHeader
+        title="导入导出"
+        meta="台账、照片包、PDF 闭环单任务"
+        action={(
+          <div className="action-row wrap">
+            {canExportItemData(user) ? <Button onClick={() => void state.createExportJob("excel")}>导出台账</Button> : null}
+            {canExportItemData(user) ? <Button variant="secondary" onClick={() => void state.createExportJob("photo_package")}>导出照片包</Button> : null}
+          </div>
+        )}
       />
+      <Card>
+        <div className="card-title-row">
+          <h3>导出任务</h3>
+          {state.runtimeConfig.useMocks ? <span className="muted">演示数据</span> : null}
+        </div>
+        <div className="form-grid">
+          <Field label="PDF 闭环单事项">
+            <Select value={pdfTargetId} onChange={(event) => setPdfItemId(event.target.value)}>
+              {exportableItems.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.itemNo} - {item.title}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="单事项导出">
+            <Button variant="secondary" disabled={!pdfTargetId} onClick={() => void state.createExportJob("pdf", { itemId: pdfTargetId })}>导出 PDF 闭环单</Button>
+          </Field>
+        </div>
+        {state.exportJobRecords.length === 0 ? <EmptyState title="暂无导出任务" description="创建台账、照片包、PDF 或审计导出后会显示在这里。" /> : null}
+        {state.exportJobRecords.length > 0 ? (
+          <DataTable
+            columns={["任务", "类型", "状态", "发起人", "创建时间", "操作"]}
+            rows={state.exportJobRecords.map((job) => [
+              job.id,
+              exportTypeText(job.type),
+              job.status,
+              getUser(job.requestedBy)?.name || "-",
+              formatDate(job.createdAt),
+              <div className="action-row wrap">
+                <Button variant="secondary" onClick={() => void state.refreshExportJob(job.id)}>刷新</Button>
+                {job.status === "succeeded" ? <Button variant="secondary" onClick={() => void state.downloadExportJob(job.id)}>下载</Button> : null}
+                {job.errorMessage ? <span className="error-text">{job.errorMessage}</span> : null}
+              </div>
+            ])}
+          />
+        ) : null}
+      </Card>
+      {canImport ? (
+        <Card>
+          <div className="card-title-row">
+            <h3>导入基础数据</h3>
+            <Button variant="secondary" onClick={submitImport}>提交导入</Button>
+          </div>
+          <div className="form-grid">
+            <Field label="导入类型">
+              <Select value={importKind} onChange={(event) => setImportKind(event.target.value as ImportKind)}>
+                <option value="sections">标段</option>
+                <option value="organizations">单位</option>
+                <option value="areas">区域</option>
+                <option value="disciplines">专业</option>
+                <option value="users">用户</option>
+              </Select>
+            </Field>
+            <Field label="文件名">
+              <TextInput value={sourceFileName} onChange={(event) => setSourceFileName(event.target.value)} />
+            </Field>
+            <Field label="CSV 文件">
+              <TextInput type="file" accept=".csv,text/csv" onChange={(event) => void readImportFile(event.target.files?.[0])} />
+            </Field>
+          </div>
+          <Field label="CSV 内容">
+            <TextArea value={csvText} onChange={(event) => setCsvText(event.target.value)} />
+          </Field>
+        </Card>
+      ) : null}
+      {state.importJobRecords.length > 0 ? (
+        <Card>
+          <h3>导入结果</h3>
+          <DataTable
+            columns={["任务", "类型", "状态", "通过", "拒绝", "错误"]}
+            rows={state.importJobRecords.map((job) => [
+              job.id,
+              importKindText(job.kind),
+              job.status,
+              job.acceptedRows,
+              job.rejectedRows,
+              job.errors.length > 0 ? job.errors.map((error) => `第 ${error.rowNumber} 行 ${error.field || ""} ${error.message}`).join("；") : job.errorMessage || "-"
+            ])}
+          />
+        </Card>
+      ) : null}
+      {state.dataError ? <p className="error-text">{state.dataError}</p> : null}
     </div>
   );
+}
+
+function exportTypeText(type: ExportJob["type"]) {
+  return {
+    excel: "事项台账",
+    photo_package: "照片包",
+    pdf: "PDF 闭环单",
+    audit: "审计导出"
+  }[type];
+}
+
+function importKindText(kind: ImportKind) {
+  return {
+    sections: "标段",
+    organizations: "单位",
+    areas: "区域",
+    disciplines: "专业",
+    users: "用户"
+  }[kind];
 }
 
 function AuditPage({ state }: { state: AppState }) {
@@ -3322,7 +3578,11 @@ function AuditPage({ state }: { state: AppState }) {
   }, [action, resourceType, state.refreshAuditLogs]);
   return (
     <div className="stack">
-      <PageHeader title="审计日志" meta="按用户、时间、资源、动作筛选" action={<Button variant="secondary">导出审计</Button>} />
+      <PageHeader
+        title="审计日志"
+        meta="按用户、时间、资源、动作筛选"
+        action={<Button variant="secondary" onClick={() => void state.createExportJob("audit", { auditQuery: { resourceType: resourceType.trim() || undefined, action: action.trim() || undefined } })}>导出审计</Button>}
+      />
       <div className="filter-bar">
         <TextInput placeholder="资源类型，例如 SiteItem" value={resourceType} onChange={(event) => setResourceType(event.target.value)} />
         <TextInput placeholder="动作，例如 create" value={action} onChange={(event) => setAction(event.target.value)} />

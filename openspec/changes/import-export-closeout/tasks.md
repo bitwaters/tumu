@@ -25,10 +25,10 @@
 
 ## 4. Frontend Integration
 
-- [ ] 4.1 Connect desktop import/export page to export job creation, status refresh, and download actions.
-- [ ] 4.2 Connect audit export button to the audit export job endpoint and download flow.
-- [ ] 4.3 Add import UI controls for master data/users with file or pasted CSV input and result display.
-- [ ] 4.4 Keep buttons hidden or disabled for unauthorized roles based on backend errors and role checks.
+- [x] 4.1 Connect desktop import/export page to export job creation, status refresh, and download actions.
+- [x] 4.2 Connect audit export button to the audit export job endpoint and download flow.
+- [x] 4.3 Add import UI controls for master data/users with file or pasted CSV input and result display.
+- [x] 4.4 Keep buttons hidden or disabled for unauthorized roles based on backend errors and role checks.
 
 ## 5. Documentation And Verification
 

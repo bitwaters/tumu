@@ -1,6 +1,7 @@
 import { deepEqual, equal, rejects } from "node:assert/strict";
 import { test } from "node:test";
 import { ApiClient, ApiError } from "./client.js";
+import { ExportsApi } from "./exports.js";
 import { createIdempotencyKey, IdempotencyKeyStore } from "./idempotency.js";
 import { readFrontendConfig } from "./env.js";
 import { clearStoredToken, readStoredToken, saveStoredToken, type TokenStorage } from "./session.js";
@@ -91,6 +92,46 @@ test("idempotency helpers create stable keys for retries", () => {
   store.clear("submit:item-1");
   const next = store.get("submit:item-1", "workflow");
   equal(first === next, false);
+});
+
+test("exports api maps import, export, status, and download routes", async () => {
+  const calls: Array<{ url: string; method?: string; body?: string; idempotencyKey?: string | null }> = [];
+  const client = new ApiClient({
+    baseUrl: "http://api.local",
+    fetchImpl: async (url, init = {}) => {
+      const headers = new Headers(init.headers);
+      calls.push({
+        url: String(url),
+        method: init.method,
+        body: typeof init.body === "string" ? init.body : undefined,
+        idempotencyKey: headers.get("idempotency-key")
+      });
+      return jsonResponse(200, { data: { id: "job-1", status: "succeeded", type: "excel", kind: "sections" } });
+    }
+  });
+  const exportsApi = new ExportsApi(client);
+
+  await exportsApi.createSiteItemLedger({ status: "rectifying" });
+  await exportsApi.createPhotoPackage({ areaId: "area-1" });
+  await exportsApi.createCloseoutPdf("item-1");
+  await exportsApi.createAuditExport({ action: "create" });
+  await exportsApi.getExportJob("job-1");
+  await exportsApi.downloadExport("job-1");
+  await exportsApi.createImport("sections", { csvText: "name,code\nA,A" }, "idem-import-1");
+  await exportsApi.getImportJob("import-1");
+
+  deepEqual(calls.map((call) => [call.method, call.url]), [
+    ["POST", "http://api.local/exports/site-items"],
+    ["POST", "http://api.local/exports/photo-package"],
+    ["POST", "http://api.local/exports/site-items/item-1/pdf"],
+    ["POST", "http://api.local/exports/audit"],
+    ["GET", "http://api.local/exports/job-1"],
+    ["GET", "http://api.local/exports/job-1/download"],
+    ["POST", "http://api.local/imports/sections"],
+    ["GET", "http://api.local/imports/import-1"]
+  ]);
+  equal(calls[6]?.idempotencyKey, "idem-import-1");
+  equal(calls[0]?.body, JSON.stringify({ status: "rectifying" }));
 });
 
 function jsonResponse(status: number, body: unknown): Response {
