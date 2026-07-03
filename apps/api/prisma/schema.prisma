@@ -72,9 +72,25 @@ enum ExportType {
   excel
   photo_package
   pdf
+  audit
 }
 
 enum ExportStatus {
+  queued
+  running
+  succeeded
+  failed
+}
+
+enum ImportKind {
+  organizations
+  sections
+  areas
+  disciplines
+  users
+}
+
+enum ImportStatus {
   queued
   running
   succeeded
@@ -110,14 +126,14 @@ model Section {
 }
 
 model Organization {
-  id            String             @id @default(uuid())
-  projectId     String
-  project       Project            @relation(fields: [projectId], references: [id])
-  name          String
-  type          OrganizationType
-  isActive      Boolean            @default(true)
-  users         User[]
-  siteItems     SiteItem[]          @relation("ResponsibleOrganization")
+  id        String           @id @default(uuid())
+  projectId String
+  project   Project          @relation(fields: [projectId], references: [id])
+  name      String
+  type      OrganizationType
+  isActive  Boolean          @default(true)
+  users     User[]
+  siteItems SiteItem[]       @relation("ResponsibleOrganization")
 
   @@unique([projectId, name])
 }
@@ -142,17 +158,18 @@ model User {
   workflowLogs   WorkflowLog[]
   notifications  Notification[]
   exportJobs     ExportJob[]
+  importJobs     ImportJob[]
   auditLogs      AuditLog[]
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 }
 
 model UserSectionScope {
-  id        String   @id @default(uuid())
+  id        String  @id @default(uuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id])
+  user      User    @relation(fields: [userId], references: [id])
   sectionId String
-  section   Section  @relation(fields: [sectionId], references: [id])
+  section   Section @relation(fields: [sectionId], references: [id])
 
   @@unique([userId, sectionId])
 }
@@ -187,45 +204,45 @@ model Discipline {
 }
 
 model Drawing {
-  id          String            @id @default(uuid())
-  projectId   String
-  project     Project           @relation(fields: [projectId], references: [id])
-  areaId      String
-  area        Area              @relation(fields: [areaId], references: [id])
+  id           String            @id @default(uuid())
+  projectId    String
+  project      Project           @relation(fields: [projectId], references: [id])
+  areaId       String
+  area         Area              @relation(fields: [areaId], references: [id])
   disciplineId String?
-  discipline Discipline?        @relation(fields: [disciplineId], references: [id])
-  name        String
-  code        String
-  isActive    Boolean           @default(true)
-  revisions   DrawingRevision[]
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  discipline   Discipline?       @relation(fields: [disciplineId], references: [id])
+  name         String
+  code         String
+  isActive     Boolean           @default(true)
+  revisions    DrawingRevision[]
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
 
   @@unique([projectId, code])
 }
 
 model DrawingRevision {
   id              String                @id @default(uuid())
-  drawingId        String
-  drawing          Drawing               @relation(fields: [drawingId], references: [id])
-  revisionNo       String
-  fileKey          String
-  coverPreviewKey  String
-  pageCount        Int
-  uploadedBy       String
-  uploadedAt       DateTime              @default(now())
-  isCurrent        Boolean               @default(false)
-  pages            DrawingRevisionPage[]
+  drawingId       String
+  drawing         Drawing               @relation(fields: [drawingId], references: [id])
+  revisionNo      String
+  fileKey         String
+  coverPreviewKey String
+  pageCount       Int
+  uploadedBy      String
+  uploadedAt      DateTime              @default(now())
+  isCurrent       Boolean               @default(false)
+  pages           DrawingRevisionPage[]
 }
 
 model DrawingRevisionPage {
   id                String          @id @default(uuid())
-  drawingRevisionId  String
-  drawingRevision    DrawingRevision @relation(fields: [drawingRevisionId], references: [id])
-  pageNumber         Int
-  previewKey         String
-  width              Int
-  height             Int
+  drawingRevisionId String
+  drawingRevision   DrawingRevision @relation(fields: [drawingRevisionId], references: [id])
+  pageNumber        Int
+  previewKey        String
+  width             Int
+  height            Int
 
   @@unique([drawingRevisionId, pageNumber])
 }
@@ -270,57 +287,80 @@ model SiteItem {
 
 model PhotoAttachment {
   id                     String      @id @default(uuid())
-  siteItemId              String?
-  siteItem                SiteItem?   @relation(fields: [siteItemId], references: [id])
-  stage                   PhotoStage?
-  objectKey               String      @unique
-  thumbnailKey            String
-  fileName                String
-  mimeType                String
-  sizeBytes               Int
-  uploadedBy              String
-  uploader                User        @relation("UploadedPhotos", fields: [uploadedBy], references: [id])
-  uploadedAt              DateTime    @default(now())
-  deletedAt               DateTime?
-  sectionSnapshot         String?
-  areaSnapshot            String?
-  disciplineSnapshot      String?
-  responsibleOrgSnapshot  String?
+  siteItemId             String?
+  siteItem               SiteItem?   @relation(fields: [siteItemId], references: [id])
+  stage                  PhotoStage?
+  objectKey              String      @unique
+  thumbnailKey           String
+  fileName               String
+  mimeType               String
+  sizeBytes              Int
+  uploadedBy             String
+  uploader               User        @relation("UploadedPhotos", fields: [uploadedBy], references: [id])
+  uploadedAt             DateTime    @default(now())
+  deletedAt              DateTime?
+  sectionSnapshot        String?
+  areaSnapshot           String?
+  disciplineSnapshot     String?
+  responsibleOrgSnapshot String?
 }
 
 model WorkflowLog {
-  id          String           @id @default(uuid())
-  siteItemId  String
-  siteItem    SiteItem         @relation(fields: [siteItemId], references: [id])
-  action      WorkflowAction
-  fromStatus  SiteItemStatus?
-  toStatus    SiteItemStatus?
-  comment     String
-  actorId     String
-  actor       User             @relation(fields: [actorId], references: [id])
-  createdAt   DateTime         @default(now())
+  id         String          @id @default(uuid())
+  siteItemId String
+  siteItem   SiteItem        @relation(fields: [siteItemId], references: [id])
+  action     WorkflowAction
+  fromStatus SiteItemStatus?
+  toStatus   SiteItemStatus?
+  comment    String
+  actorId    String
+  actor      User            @relation(fields: [actorId], references: [id])
+  createdAt  DateTime        @default(now())
 }
 
 model Notification {
-  id          String            @id @default(uuid())
+  id          String           @id @default(uuid())
   recipientId String
-  recipient   User              @relation(fields: [recipientId], references: [id])
+  recipient   User             @relation(fields: [recipientId], references: [id])
   siteItemId  String?
-  siteItem    SiteItem?         @relation(fields: [siteItemId], references: [id])
+  siteItem    SiteItem?        @relation(fields: [siteItemId], references: [id])
   type        NotificationType
   title       String
   content     String
   readAt      DateTime?
-  createdAt   DateTime          @default(now())
+  createdAt   DateTime         @default(now())
 }
 
 model ExportJob {
-  id          String       @id @default(uuid())
-  type        ExportType
-  status      ExportStatus
-  requestedBy String
-  requester   User         @relation(fields: [requestedBy], references: [id])
-  createdAt   DateTime     @default(now())
+  id               String       @id @default(uuid())
+  type             ExportType
+  status           ExportStatus @default(queued)
+  requestedBy      String
+  requester        User         @relation(fields: [requestedBy], references: [id])
+  params           Json?
+  artifactKey      String?
+  artifactFileName String?
+  artifactMimeType String?
+  errorMessage     String?
+  createdAt        DateTime     @default(now())
+  startedAt        DateTime?
+  completedAt      DateTime?
+}
+
+model ImportJob {
+  id             String       @id @default(uuid())
+  kind           ImportKind
+  status         ImportStatus @default(queued)
+  requestedBy    String
+  requester      User         @relation(fields: [requestedBy], references: [id])
+  sourceFileName String?
+  acceptedRows   Int          @default(0)
+  rejectedRows   Int          @default(0)
+  errors         Json?
+  errorMessage   String?
+  createdAt      DateTime     @default(now())
+  startedAt      DateTime?
+  completedAt    DateTime?
 }
 
 model AuditLog {

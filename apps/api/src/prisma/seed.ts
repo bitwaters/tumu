@@ -36,7 +36,7 @@ const revisionRows = store.drawings.flatMap((drawing) =>
 const pageRows = store.drawings.flatMap((drawing) => drawing.revisions.flatMap((revision) => revision.pages));
 
 const seedSql = [
-  `TRUNCATE TABLE "IdempotencyRecord", "AuditLog", "ExportJob", "Notification", "WorkflowLog", "PhotoAttachment", "SiteItem", "DrawingRevisionPage", "DrawingRevision", "Drawing", "Discipline", "Area", "UserSectionScope", "User", "Organization", "Section", "Project" CASCADE;`,
+  `TRUNCATE TABLE "IdempotencyRecord", "AuditLog", "ImportJob", "ExportJob", "Notification", "WorkflowLog", "PhotoAttachment", "SiteItem", "DrawingRevisionPage", "DrawingRevision", "Drawing", "Discipline", "Area", "UserSectionScope", "User", "Organization", "Section", "Project" CASCADE;`,
   insert("Project", [store.project]),
   insert("Section", store.sections),
   insert("Organization", store.organizations),
@@ -110,6 +110,7 @@ const seedSql = [
     }))
   ),
   insert("ExportJob", store.exportJobs),
+  insert("ImportJob", store.importJobs),
   insert(
     "AuditLog",
     store.auditLogs.map((log) => ({

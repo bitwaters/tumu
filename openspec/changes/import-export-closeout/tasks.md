@@ -1,9 +1,9 @@
 ## 1. Data Model And Utilities
 
-- [ ] 1.1 Extend Prisma schema and public types for export jobs, import jobs, artifact metadata, and row-level import errors.
-- [ ] 1.2 Add migrations and mappers for export/import job persistence.
-- [ ] 1.3 Add CSV escaping/parsing utilities and file naming helpers with unit coverage.
-- [ ] 1.4 Add PDF closeout generation utility with item metadata, workflow logs, and photo manifest references.
+- [x] 1.1 Extend Prisma schema and public types for export jobs, import jobs, artifact metadata, and row-level import errors.
+- [x] 1.2 Add migrations and mappers for export/import job persistence.
+- [x] 1.3 Add CSV escaping/parsing utilities and file naming helpers with unit coverage.
+- [x] 1.4 Add PDF closeout generation utility with item metadata, workflow logs, and photo manifest references.
 
 ## 2. Export Backend
 

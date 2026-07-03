@@ -5,6 +5,7 @@ import type {
   Discipline,
   Drawing,
   ExportJob,
+  ImportJob,
   Notification,
   Organization,
   PhotoAttachment,
@@ -261,7 +262,35 @@ export const notifications: Notification[] = [
 ];
 
 export const exportJobs: ExportJob[] = [
-  { id: "export-001", type: "excel", status: "succeeded", requestedBy: "u-admin", createdAt: "2026-06-26T10:00:00Z" }
+  {
+    id: "export-001",
+    type: "excel",
+    status: "succeeded",
+    requestedBy: "u-admin",
+    params: { status: "open" },
+    artifactKey: "exports/site-items-20260626.csv",
+    artifactFileName: "site-items-20260626.csv",
+    artifactMimeType: "text/csv; charset=utf-8",
+    createdAt: "2026-06-26T10:00:00Z",
+    startedAt: "2026-06-26T10:00:01Z",
+    completedAt: "2026-06-26T10:00:02Z"
+  }
+];
+
+export const importJobs: ImportJob[] = [
+  {
+    id: "import-001",
+    kind: "users",
+    status: "succeeded",
+    requestedBy: "u-admin",
+    sourceFileName: "users-seed.csv",
+    acceptedRows: 1,
+    rejectedRows: 0,
+    errors: [],
+    createdAt: "2026-06-26T11:00:00Z",
+    startedAt: "2026-06-26T11:00:01Z",
+    completedAt: "2026-06-26T11:00:02Z"
+  }
 ];
 
 export const auditLogs: AuditLog[] = [
@@ -282,6 +311,7 @@ export function createStore(): Store {
     workflowLogs: structuredClone(workflowLogs),
     notifications: structuredClone(notifications),
     exportJobs: structuredClone(exportJobs),
+    importJobs: structuredClone(importJobs),
     auditLogs: structuredClone(auditLogs),
     idempotencyRecords: []
   };

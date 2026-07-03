@@ -22,6 +22,10 @@ export type WorkflowAction =
   | "reopen"
   | "comment";
 export type NotificationType = "assigned" | "review_requested" | "due_soon" | "overdue" | "voided" | "reopened";
+export type ExportType = "excel" | "photo_package" | "pdf" | "audit";
+export type ExportStatus = "queued" | "running" | "succeeded" | "failed";
+export type ImportKind = "organizations" | "sections" | "areas" | "disciplines" | "users";
+export type ImportStatus = "queued" | "running" | "succeeded" | "failed";
 
 export interface Project {
   id: string;
@@ -176,10 +180,38 @@ export interface Notification {
 
 export interface ExportJob {
   id: string;
-  type: "excel" | "photo_package" | "pdf";
-  status: "queued" | "running" | "succeeded" | "failed";
+  type: ExportType;
+  status: ExportStatus;
   requestedBy: string;
+  params?: Record<string, unknown>;
+  artifactKey?: string;
+  artifactFileName?: string;
+  artifactMimeType?: string;
+  errorMessage?: string;
   createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface ImportRowError {
+  rowNumber: number;
+  field?: string;
+  message: string;
+}
+
+export interface ImportJob {
+  id: string;
+  kind: ImportKind;
+  status: ImportStatus;
+  requestedBy: string;
+  sourceFileName?: string;
+  acceptedRows: number;
+  rejectedRows: number;
+  errors: ImportRowError[];
+  errorMessage?: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
 }
 
 export interface AuditLog {
@@ -218,6 +250,7 @@ export interface Store {
   workflowLogs: WorkflowLog[];
   notifications: Notification[];
   exportJobs: ExportJob[];
+  importJobs: ImportJob[];
   auditLogs: AuditLog[];
   idempotencyRecords: IdempotencyRecord[];
 }

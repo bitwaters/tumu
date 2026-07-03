@@ -4,6 +4,7 @@ import type {
   Discipline,
   Drawing,
   ExportJob,
+  ImportJob,
   Notification,
   Organization,
   PhotoAttachment,
@@ -300,8 +301,36 @@ export const notifications: Notification[] = [
 ];
 
 export const exportJobs: ExportJob[] = [
-  { id: "ex-001", type: "excel", status: "succeeded", requestedBy: "u-admin", createdAt: "2026-06-26T08:20:00Z" },
-  { id: "ex-002", type: "photo_package", status: "running", requestedBy: "u-supervisor", createdAt: "2026-06-26T10:20:00Z" }
+  {
+    id: "ex-001",
+    type: "excel",
+    status: "succeeded",
+    requestedBy: "u-admin",
+    params: { status: "open" },
+    artifactKey: "exports/site-items-20260626.csv",
+    artifactFileName: "site-items-20260626.csv",
+    artifactMimeType: "text/csv; charset=utf-8",
+    createdAt: "2026-06-26T08:20:00Z",
+    startedAt: "2026-06-26T08:20:01Z",
+    completedAt: "2026-06-26T08:20:02Z"
+  },
+  { id: "ex-002", type: "photo_package", status: "running", requestedBy: "u-supervisor", createdAt: "2026-06-26T10:20:00Z", startedAt: "2026-06-26T10:20:01Z" }
+];
+
+export const importJobs: ImportJob[] = [
+  {
+    id: "im-001",
+    kind: "users",
+    status: "succeeded",
+    requestedBy: "u-admin",
+    sourceFileName: "users-seed.csv",
+    acceptedRows: 1,
+    rejectedRows: 0,
+    errors: [],
+    createdAt: "2026-06-26T09:20:00Z",
+    startedAt: "2026-06-26T09:20:01Z",
+    completedAt: "2026-06-26T09:20:02Z"
+  }
 ];
 
 export const auditLogs: AuditLog[] = [

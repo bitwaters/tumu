@@ -2,6 +2,9 @@ import type {
   Drawing,
   DrawingRevision,
   DrawingRevisionPage,
+  ExportJob,
+  ImportJob,
+  ImportRowError,
   PhotoAttachment,
   AuditLog,
   Notification,
@@ -230,6 +233,36 @@ export interface NotificationRecord {
   createdAt: Date;
 }
 
+export interface ExportJobRecord {
+  id: string;
+  type: ExportJob["type"];
+  status: ExportJob["status"];
+  requestedBy: string;
+  params: unknown;
+  artifactKey: string | null;
+  artifactFileName: string | null;
+  artifactMimeType: string | null;
+  errorMessage: string | null;
+  createdAt: Date;
+  startedAt: Date | null;
+  completedAt: Date | null;
+}
+
+export interface ImportJobRecord {
+  id: string;
+  kind: ImportJob["kind"];
+  status: ImportJob["status"];
+  requestedBy: string;
+  sourceFileName: string | null;
+  acceptedRows: number;
+  rejectedRows: number;
+  errors: unknown;
+  errorMessage: string | null;
+  createdAt: Date;
+  startedAt: Date | null;
+  completedAt: Date | null;
+}
+
 export interface AuditLogRecord {
   id: string;
   actorId: string;
@@ -253,6 +286,40 @@ export function mapNotificationRecord(record: NotificationRecord): Notification 
   };
 }
 
+export function mapExportJobRecord(record: ExportJobRecord): ExportJob {
+  return {
+    id: record.id,
+    type: record.type,
+    status: record.status,
+    requestedBy: record.requestedBy,
+    params: isRecord(record.params) ? record.params : undefined,
+    artifactKey: record.artifactKey ?? undefined,
+    artifactFileName: record.artifactFileName ?? undefined,
+    artifactMimeType: record.artifactMimeType ?? undefined,
+    errorMessage: record.errorMessage ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    startedAt: record.startedAt?.toISOString(),
+    completedAt: record.completedAt?.toISOString()
+  };
+}
+
+export function mapImportJobRecord(record: ImportJobRecord): ImportJob {
+  return {
+    id: record.id,
+    kind: record.kind,
+    status: record.status,
+    requestedBy: record.requestedBy,
+    sourceFileName: record.sourceFileName ?? undefined,
+    acceptedRows: record.acceptedRows,
+    rejectedRows: record.rejectedRows,
+    errors: parseImportErrors(record.errors),
+    errorMessage: record.errorMessage ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    startedAt: record.startedAt?.toISOString(),
+    completedAt: record.completedAt?.toISOString()
+  };
+}
+
 export function mapAuditLogRecord(record: AuditLogRecord): AuditLog {
   return {
     id: record.id,
@@ -263,6 +330,18 @@ export function mapAuditLogRecord(record: AuditLogRecord): AuditLog {
     metadata: isRecord(record.metadata) ? record.metadata : undefined,
     createdAt: record.createdAt.toISOString()
   };
+}
+
+function parseImportErrors(value: unknown): ImportRowError[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isImportRowError);
+}
+
+function isImportRowError(value: unknown): value is ImportRowError {
+  if (!isRecord(value)) return false;
+  if (typeof value.rowNumber !== "number" || !Number.isInteger(value.rowNumber)) return false;
+  if (value.field !== undefined && typeof value.field !== "string") return false;
+  return typeof value.message === "string";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

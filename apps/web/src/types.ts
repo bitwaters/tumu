@@ -11,6 +11,10 @@ export type SiteItemStatus =
 export type Severity = "normal" | "important" | "severe";
 export type PhotoStage = "discovery" | "rectification" | "review";
 export type UploadState = "pending" | "uploading" | "failed" | "complete";
+export type ExportType = "excel" | "photo_package" | "pdf" | "audit";
+export type ExportStatus = "queued" | "running" | "succeeded" | "failed";
+export type ImportKind = "organizations" | "sections" | "areas" | "disciplines" | "users";
+export type ImportStatus = "queued" | "running" | "succeeded" | "failed";
 export type WorkflowAction =
   | "create"
   | "dispatch"
@@ -170,10 +174,38 @@ export interface Notification {
 
 export interface ExportJob {
   id: string;
-  type: "excel" | "photo_package" | "pdf";
-  status: "queued" | "running" | "succeeded" | "failed";
+  type: ExportType;
+  status: ExportStatus;
   requestedBy: string;
+  params?: Record<string, unknown>;
+  artifactKey?: string;
+  artifactFileName?: string;
+  artifactMimeType?: string;
+  errorMessage?: string;
   createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface ImportRowError {
+  rowNumber: number;
+  field?: string;
+  message: string;
+}
+
+export interface ImportJob {
+  id: string;
+  kind: ImportKind;
+  status: ImportStatus;
+  requestedBy: string;
+  sourceFileName?: string;
+  acceptedRows: number;
+  rejectedRows: number;
+  errors: ImportRowError[];
+  errorMessage?: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
 }
 
 export interface AuditLog {
