@@ -13,4 +13,4 @@
 
 - [x] 3.1 Add or update API/import/frontend tests for explicit password success and missing-password rejection.
 - [x] 3.2 Run targeted tests, API/Web typechecks, builds, and OpenSpec validation.
-- [ ] 3.3 Archive the OpenSpec change after all tasks complete.
+- [x] 3.3 Archive the OpenSpec change after all tasks complete.
