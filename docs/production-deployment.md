@@ -7,27 +7,37 @@
 - Linux 服务器已安装 Docker Engine 和 Docker Compose plugin。
 - 服务器能访问项目代码或发布包。
 - 已规划持久化磁盘和备份目录，例如 `/var/backups/site-management`。
-- 已准备可长期保存的生产密钥，不能使用 `.env.production.example` 中的 `CHANGE_ME` 示例值。
+- 已确认生产访问主机名或内网 IP，例如 `power-site.internal` 或 `10.0.0.8`。
+- 已准备或计划创建用于上线烟测的生产账号。
 
 ## 2. 首次部署
 
-1. 复制环境模板：
+1. 生成生产环境文件：
 
 ```bash
-cp .env.production.example .env.production
+npm run prod:init-env -- --host 10.0.0.8 --smoke-username wang.supervisor --smoke-password STRONG_SMOKE_PASSWORD
 ```
 
-2. 编辑 `.env.production`，至少替换：
+将 `10.0.0.8` 替换为实际生产主机名或内网 IP。`--host` 不要带 `http://`、端口或路径。脚本会生成 `.env.production`，自动写入 PostgreSQL、MinIO、JWT 等随机生产密钥，并按 host 生成：
 
-- `POSTGRES_PASSWORD`
-- `S3_ACCESS_KEY`
-- `S3_SECRET_KEY`
-- `JWT_SECRET`
 - `PUBLIC_API_BASE_URL`
 - `PUBLIC_WEB_BASE_URL`
-- `BACKUP_DIR`
-- `SMOKE_USERNAME`
-- `SMOKE_PASSWORD`
+
+常用可选参数：
+
+- `--api-port 4000`：公开 API 端口，默认 `4000`。
+- `--web-port 8080`：公开 Web 端口，默认 `8080`。
+- `--backup-dir /var/backups/site-management`：备份目录。
+- `--image-tag release-20260703`：生产镜像 tag。
+- `--force`：确认覆盖已有 `.env.production`。
+
+`.env.production.example` 仅作为人工配置参考。不要把示例文件中的 `CHANGE_ME` 值用于生产。
+
+2. 检查 `.env.production`：
+
+- `SMOKE_USERNAME` 和 `SMOKE_PASSWORD` 必须与后续创建或导入的真实生产账号一致，否则 `npm run prod:smoke` 会失败。
+- 如使用非默认端口、反向代理或域名，需要确认 `PUBLIC_API_BASE_URL` 和 `PUBLIC_WEB_BASE_URL` 是用户浏览器可访问的地址。
+- `.env.production` 含真实密钥，不应提交到 Git，也不要复制到不受控的位置。
 
 3. 准备备份目录：
 
