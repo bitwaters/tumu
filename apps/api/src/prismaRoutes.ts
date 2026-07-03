@@ -24,8 +24,12 @@ import { PhotosService } from "./services/photos/index.js";
 import { SiteItemsService } from "./services/site-items/index.js";
 import { UsersService } from "./services/users/index.js";
 import {
+  buildAuditExport,
+  buildCloseoutPdfExport,
+  buildPhotoPackageExport,
   buildSiteItemLedgerExport,
   canCreateSiteItemLedgerExport,
+  type GeneratedExportArtifact,
   readGeneratedExportArtifact
 } from "./services/import-export/index.js";
 import type { ExportJob, Role, Severity, SiteItem, SiteItemStatus, SiteItemType, User, WorkflowAction } from "./types.js";
@@ -220,18 +224,10 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
     if (!canCreateSiteItemLedgerExport(actor)) throw forbidden();
     const filters = parseSiteItemExportFilters(request.body ? assertRecord(request.body) : {});
     const now = new Date();
-    let job = await exportJobsRepository.create({
-      type: "excel",
-      status: "running",
-      requestedBy: actor.id,
-      params: filters,
-      startedAt: now
-    });
-
-    try {
+    return runPrismaExportJob(exportJobsRepository, auditRepository, actor, "excel", filters, "export_site_items", async () => {
       const items = await siteItemsService.list(actor, filters);
       const details = await Promise.all(items.map((item) => siteItemsRepository.findDetailById(actor, item.id)));
-      const artifact = buildSiteItemLedgerExport({
+      return buildSiteItemLedgerExport({
         requester: actor,
         items,
         photos: details.flatMap((detail) => detail?.photos ?? []),
@@ -243,28 +239,54 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
         users: await usersService.listVisible(actor, {}),
         generatedAt: now
       });
-      job = (await exportJobsRepository.update(job.id, {
-        status: "succeeded",
-        artifactKey: artifact.artifactKey,
-        artifactFileName: artifact.fileName,
-        artifactMimeType: artifact.mimeType,
-        completedAt: new Date()
-      })) as ExportJob;
-      await auditRepository.create({
-        actorId: actor.id,
-        action: "export_site_items",
-        resourceType: "ExportJob",
-        resourceId: job.id
-      });
-    } catch (error) {
-      job = (await exportJobsRepository.update(job.id, {
-        status: "failed",
-        errorMessage: error instanceof Error ? error.message : "Export failed",
-        completedAt: new Date()
-      })) as ExportJob;
-    }
+    });
+  });
 
-    return job;
+  router.add("POST", "/exports/photo-package", async (request) => {
+    const actor = await viewer(request);
+    if (!canCreateSiteItemLedgerExport(actor)) throw forbidden();
+    const filters = parseSiteItemExportFilters(request.body ? assertRecord(request.body) : {});
+    const now = new Date();
+    return runPrismaExportJob(exportJobsRepository, auditRepository, actor, "photo_package", filters, "export_photo_package", async () => {
+      const items = await siteItemsService.list(actor, filters);
+      const details = await Promise.all(items.map((item) => siteItemsRepository.findDetailById(actor, item.id)));
+      return buildPhotoPackageExport({
+        requester: actor,
+        items,
+        photos: details.flatMap((detail) => detail?.photos ?? []),
+        users: await usersService.listVisible(actor, {}),
+        generatedAt: now
+      });
+    });
+  });
+
+  router.add("POST", "/exports/site-items/:id/pdf", async (request) => {
+    const actor = await viewer(request);
+    const detail = await siteItemsService.detail(actor, request.params.id);
+    const now = new Date();
+    return runPrismaExportJob(exportJobsRepository, auditRepository, actor, "pdf", { itemId: detail.id }, "export_closeout_pdf", async () =>
+      buildCloseoutPdfExport({
+        requester: actor,
+        item: detail,
+        photos: [...detail.photos.discovery, ...detail.photos.rectification, ...detail.photos.review],
+        workflowLogs: detail.workflowLogs,
+        generatedAt: now
+      })
+    );
+  });
+
+  router.add("POST", "/exports/audit", async (request) => {
+    const actor = await viewer(request);
+    if (actor.role !== "admin") throw forbidden();
+    const filters = parseAuditExportFilters(request.body ? assertRecord(request.body) : {});
+    const now = new Date();
+    return runPrismaExportJob(exportJobsRepository, auditRepository, actor, "audit", filters, "export_audit", async () =>
+      buildAuditExport({
+        requester: actor,
+        logs: await auditService.list(actor, filters),
+        generatedAt: now
+      })
+    );
   });
 
   router.add("GET", "/exports/:id", async (request) => {
@@ -294,6 +316,49 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
   });
 
   return router;
+}
+
+async function runPrismaExportJob(
+  exportJobsRepository: ExportJobsRepository,
+  auditRepository: AuditRepository,
+  actor: User,
+  type: ExportJob["type"],
+  params: Record<string, unknown>,
+  auditAction: string,
+  buildArtifact: (job: ExportJob) => Promise<GeneratedExportArtifact>
+): Promise<ExportJob> {
+  let job = await exportJobsRepository.create({
+    type,
+    status: "running",
+    requestedBy: actor.id,
+    params,
+    startedAt: new Date()
+  });
+
+  try {
+    const artifact = await buildArtifact(job);
+    job = (await exportJobsRepository.update(job.id, {
+      status: "succeeded",
+      artifactKey: artifact.artifactKey,
+      artifactFileName: artifact.fileName,
+      artifactMimeType: artifact.mimeType,
+      completedAt: new Date()
+    })) as ExportJob;
+    await auditRepository.create({
+      actorId: actor.id,
+      action: auditAction,
+      resourceType: "ExportJob",
+      resourceId: job.id
+    });
+  } catch (error) {
+    job = (await exportJobsRepository.update(job.id, {
+      status: "failed",
+      errorMessage: error instanceof Error ? error.message : "Export failed",
+      completedAt: new Date()
+    })) as ExportJob;
+  }
+
+  return job;
 }
 
 type ViewerResolver = (request: Parameters<Router["add"]>[2] extends (request: infer R) => unknown ? R : never) => Promise<User>;
@@ -364,6 +429,13 @@ function parseSiteItemExportFilters(body: Record<string, unknown>) {
     organizationId?: string;
     overdue?: boolean;
   };
+}
+
+function parseAuditExportFilters(body: Record<string, unknown>) {
+  return pickDefined({
+    resourceType: typeof body.resourceType === "string" && body.resourceType.trim() ? body.resourceType.trim() : undefined,
+    action: typeof body.action === "string" && body.action.trim() ? body.action.trim() : undefined
+  });
 }
 
 const siteItemStatuses = ["pending_approval", "dispatched", "rectifying", "pending_acceptance", "closed", "voided"] as const;

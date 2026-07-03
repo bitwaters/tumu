@@ -16,8 +16,12 @@ import { writeAudit } from "./audit.js";
 import { hashPassword, issueToken, verifyPassword } from "./security.js";
 import { withStoreTransaction } from "./transaction.js";
 import {
+  buildAuditExport,
+  buildCloseoutPdfExport,
+  buildPhotoPackageExport,
   buildSiteItemLedgerExport,
   canCreateSiteItemLedgerExport,
+  type GeneratedExportArtifact,
   readGeneratedExportArtifact
 } from "./services/import-export/index.js";
 import {
@@ -411,20 +415,9 @@ function registerExportRoutes(router: Router, store: Store, config: ApiConfig, s
     if (!canCreateSiteItemLedgerExport(user)) throw forbidden();
     const filters = parseSiteItemExportFilters(request.body ? assertRecord(request.body) : {});
     const now = new Date();
-    const job: ExportJob = {
-      id: newId("export"),
-      type: "excel",
-      status: "running",
-      requestedBy: user.id,
-      params: filters,
-      createdAt: now.toISOString(),
-      startedAt: now.toISOString()
-    };
-    store.exportJobs.unshift(job);
-
-    try {
+    return runMemoryExportJob(store, user, "excel", filters, "export_site_items", (job) => {
       const items = filterItemsForExport(visibleItems(user, store), filters, now);
-      const artifact = buildSiteItemLedgerExport({
+      return buildSiteItemLedgerExport({
         requester: user,
         items,
         photos: store.photos,
@@ -436,23 +429,59 @@ function registerExportRoutes(router: Router, store: Store, config: ApiConfig, s
         users: store.users,
         generatedAt: now
       });
-      Object.assign(job, {
-        status: "succeeded",
-        artifactKey: artifact.artifactKey,
-        artifactFileName: artifact.fileName,
-        artifactMimeType: artifact.mimeType,
-        completedAt: new Date().toISOString()
-      });
-      writeAudit(store, user.id, "export_site_items", "ExportJob", job.id);
-    } catch (error) {
-      Object.assign(job, {
-        status: "failed",
-        errorMessage: error instanceof Error ? error.message : "Export failed",
-        completedAt: new Date().toISOString()
-      });
-    }
+    });
+  });
 
-    return job;
+  router.add("POST", "/exports/photo-package", (request) => {
+    authenticate(request, store, config);
+    const { user } = requireContext(request);
+    if (!canCreateSiteItemLedgerExport(user)) throw forbidden();
+    const filters = parseSiteItemExportFilters(request.body ? assertRecord(request.body) : {});
+    const now = new Date();
+    return runMemoryExportJob(store, user, "photo_package", filters, "export_photo_package", () => {
+      const items = filterItemsForExport(visibleItems(user, store), filters, now);
+      return buildPhotoPackageExport({
+        requester: user,
+        items,
+        photos: store.photos,
+        users: store.users,
+        generatedAt: now
+      });
+    });
+  });
+
+  router.add("POST", "/exports/site-items/:id/pdf", (request) => {
+    authenticate(request, store, config);
+    const { user } = requireContext(request);
+    const item = mustFind(store.siteItems, request.params.id, "SiteItem");
+    if (!canAccessItem(user, item)) throw notFound("Site item not found");
+    const now = new Date();
+    return runMemoryExportJob(store, user, "pdf", { itemId: item.id }, "export_closeout_pdf", () =>
+      buildCloseoutPdfExport({
+        requester: user,
+        item,
+        photos: store.photos.filter((photo) => photo.siteItemId === item.id && !photo.deletedAt),
+        workflowLogs: store.workflowLogs.filter((log) => log.siteItemId === item.id),
+        generatedAt: now
+      })
+    );
+  });
+
+  router.add("POST", "/exports/audit", (request) => {
+    authenticate(request, store, config);
+    const { user } = requireContext(request);
+    mapForbidden(() => requireAdmin(user));
+    const filters = parseAuditExportFilters(request.body ? assertRecord(request.body) : {});
+    const now = new Date();
+    return runMemoryExportJob(store, user, "audit", filters, "export_audit", () =>
+      buildAuditExport({
+        requester: user,
+        logs: store.auditLogs
+          .filter((log) => !filters.resourceType || log.resourceType === filters.resourceType)
+          .filter((log) => !filters.action || log.action === filters.action),
+        generatedAt: now
+      })
+    );
   });
 
   router.add("GET", "/exports/:id", (request) => {
@@ -485,6 +514,47 @@ function registerExportRoutes(router: Router, store: Store, config: ApiConfig, s
   });
 }
 
+function runMemoryExportJob(
+  store: Store,
+  user: User,
+  type: ExportJob["type"],
+  params: Record<string, unknown>,
+  auditAction: string,
+  buildArtifact: (job: ExportJob) => GeneratedExportArtifact
+): ExportJob {
+  const now = new Date().toISOString();
+  const job: ExportJob = {
+    id: newId("export"),
+    type,
+    status: "running",
+    requestedBy: user.id,
+    params,
+    createdAt: now,
+    startedAt: now
+  };
+  store.exportJobs.unshift(job);
+
+  try {
+    const artifact = buildArtifact(job);
+    Object.assign(job, {
+      status: "succeeded",
+      artifactKey: artifact.artifactKey,
+      artifactFileName: artifact.fileName,
+      artifactMimeType: artifact.mimeType,
+      completedAt: new Date().toISOString()
+    });
+    writeAudit(store, user.id, auditAction, "ExportJob", job.id);
+  } catch (error) {
+    Object.assign(job, {
+      status: "failed",
+      errorMessage: error instanceof Error ? error.message : "Export failed",
+      completedAt: new Date().toISOString()
+    });
+  }
+
+  return job;
+}
+
 function mustFindAuthorizedExportJob(store: Store, user: User, jobId: string): ExportJob {
   const job = mustFind(store.exportJobs, jobId, "ExportJob");
   if (user.role !== "admin" && job.requestedBy !== user.id) throw notFound("Export job not found");
@@ -502,6 +572,13 @@ function parseSiteItemExportFilters(body: Record<string, unknown>) {
     disciplineId: optionalString(body.disciplineId),
     organizationId: optionalString(body.organizationId),
     overdue: typeof body.overdue === "boolean" ? body.overdue : undefined
+  });
+}
+
+function parseAuditExportFilters(body: Record<string, unknown>) {
+  return pickDefined({
+    resourceType: optionalString(body.resourceType),
+    action: optionalString(body.action)
   });
 }
 

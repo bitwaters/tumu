@@ -320,6 +320,44 @@ test("site item ledger export is scoped and downloadable", async () => {
   await rejects(() => request("GET", `/exports/${job.id}/download`, undefined, installRectifierToken));
 });
 
+test("photo package, closeout PDF and audit exports create downloadable artifacts", async () => {
+  const { request } = createHarness();
+  const adminToken = await login(request, "admin", "admin123");
+  const supervisorToken = await login(request, "wang.supervisor");
+  const installRectifierToken = await login(request, "chen.fix");
+
+  const packageJob = (await request("POST", "/exports/photo-package", { sectionId: "sec-civil-a" }, supervisorToken)) as { id: string; status: string };
+  equal(packageJob.status, "succeeded");
+  const packageDownload = (await request("GET", `/exports/${packageJob.id}/download`, undefined, supervisorToken)) as {
+    mimeType: string;
+    contentBase64: string;
+  };
+  equal(packageDownload.mimeType, "application/zip");
+  const packageText = Buffer.from(packageDownload.contentBase64, "base64").toString("utf8");
+  ok(packageText.includes("manifest.csv"));
+  ok(packageText.includes("ITEM-2026-0001"));
+
+  const pdfJob = (await request("POST", "/exports/site-items/item-001/pdf", {}, supervisorToken)) as { id: string; status: string };
+  equal(pdfJob.status, "succeeded");
+  const pdfDownload = (await request("GET", `/exports/${pdfJob.id}/download`, undefined, supervisorToken)) as {
+    mimeType: string;
+    contentBase64: string;
+  };
+  equal(pdfDownload.mimeType, "application/pdf");
+  ok(Buffer.from(pdfDownload.contentBase64, "base64").toString("utf8").includes("ITEM-2026-0001"));
+  await rejects(() => request("POST", "/exports/site-items/item-001/pdf", {}, installRectifierToken));
+
+  const auditJob = (await request("POST", "/exports/audit", { resourceType: "SiteItem" }, adminToken)) as { id: string; status: string };
+  equal(auditJob.status, "succeeded");
+  const auditDownload = (await request("GET", `/exports/${auditJob.id}/download`, undefined, adminToken)) as {
+    mimeType: string;
+    contentBase64: string;
+  };
+  equal(auditDownload.mimeType, "text/csv; charset=utf-8");
+  ok(Buffer.from(auditDownload.contentBase64, "base64").toString("utf8").includes("SiteItem"));
+  await rejects(() => request("POST", "/exports/audit", {}, supervisorToken));
+});
+
 async function rejects(fn: () => Promise<unknown>): Promise<void> {
   let rejected = false;
   try {

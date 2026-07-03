@@ -8,11 +8,11 @@
 ## 2. Export Backend
 
 - [x] 2.1 Implement scoped site item ledger export service and route.
-- [ ] 2.2 Implement photo package export service and route with manifest.
-- [ ] 2.3 Implement single item PDF closeout export service and route.
-- [ ] 2.4 Implement audit log export service and route for administrators.
+- [x] 2.2 Implement photo package export service and route with manifest.
+- [x] 2.3 Implement single item PDF closeout export service and route.
+- [x] 2.4 Implement audit log export service and route for administrators.
 - [x] 2.5 Implement export job status and download endpoints with permission checks.
-- [ ] 2.6 Add API tests for export permissions, scoping, artifact presence, and download denial.
+- [x] 2.6 Add API tests for export permissions, scoping, artifact presence, and download denial.
 
 ## 3. Import Backend
 
