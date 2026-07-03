@@ -106,6 +106,12 @@ export function createHttpServer(router: Router, config: ApiConfig) {
   return createServer(async (incoming, response) => {
     try {
       const method = incoming.method ?? "GET";
+      setCorsHeaders(response);
+      if (method === "OPTIONS") {
+        response.statusCode = 204;
+        response.end();
+        return;
+      }
       const url = new URL(incoming.url ?? "/", `http://${incoming.headers.host ?? "127.0.0.1"}`);
       const matched = router.match(method, url.pathname);
       if (!matched) throw notFound(`No route for ${method} ${url.pathname}`);
@@ -145,8 +151,15 @@ function handleError(response: ServerResponse, error: unknown): void {
 
 export function writeJson(response: ServerResponse, status: number, body: unknown): void {
   response.statusCode = status;
+  setCorsHeaders(response);
   response.setHeader("content-type", "application/json; charset=utf-8");
   response.end(JSON.stringify(body));
+}
+
+function setCorsHeaders(response: ServerResponse): void {
+  response.setHeader("access-control-allow-origin", "*");
+  response.setHeader("access-control-allow-methods", "GET,POST,PATCH,DELETE,OPTIONS");
+  response.setHeader("access-control-allow-headers", "authorization,content-type,idempotency-key");
 }
 
 export function assertRecord(body: unknown): Record<string, unknown> {

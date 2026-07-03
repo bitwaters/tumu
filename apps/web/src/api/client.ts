@@ -35,7 +35,7 @@ export class ApiClient {
 
   constructor(options: ApiClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.tokenStorage = options.tokenStorage;
     this.onUnauthorized = options.onUnauthorized;
   }
@@ -68,7 +68,7 @@ export class ApiClient {
       throw new ApiError(readErrorMessage(responseBody, response.status), response.status, responseBody);
     }
 
-    return responseBody as T;
+    return unwrapSuccessBody<T>(responseBody);
   }
 
   get<T>(path: string, options: Omit<ApiRequestOptions, "method" | "body"> = {}): Promise<T> {
@@ -110,6 +110,17 @@ function readErrorMessage(body: unknown, status: number): string {
     const record = body as Record<string, unknown>;
     if (typeof record.message === "string") return record.message;
     if (typeof record.error === "string") return record.error;
+    if (typeof record.error === "object" && record.error !== null) {
+      const error = record.error as Record<string, unknown>;
+      if (typeof error.message === "string") return error.message;
+    }
   }
   return `Request failed with status ${status}`;
+}
+
+function unwrapSuccessBody<T>(body: unknown): T {
+  if (typeof body === "object" && body !== null && "data" in body) {
+    return (body as { data: T }).data;
+  }
+  return body as T;
 }

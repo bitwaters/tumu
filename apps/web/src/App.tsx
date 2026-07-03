@@ -1413,7 +1413,6 @@ function Shell({ state, user }: { state: AppState; user: User }) {
             </button>
           ))}
         </nav>
-        {state.showNotifications ? <NotificationPanel state={state} user={user} /> : null}
       </div>
 
       <div className="desktop-shell">
@@ -1443,6 +1442,7 @@ function Shell({ state, user }: { state: AppState; user: User }) {
         </aside>
         <main className="desktop-content">{renderDesktopRoute(state, user)}</main>
       </div>
+      {state.showNotifications ? <NotificationPanel state={state} user={user} /> : null}
     </div>
   );
 }

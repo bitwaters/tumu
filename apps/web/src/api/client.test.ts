@@ -1,4 +1,4 @@
-import { equal, rejects } from "node:assert/strict";
+import { deepEqual, equal, rejects } from "node:assert/strict";
 import { test } from "node:test";
 import { ApiClient, ApiError } from "./client.js";
 import { createIdempotencyKey, IdempotencyKeyStore } from "./idempotency.js";
@@ -44,10 +44,21 @@ test("api client sends bearer token, query params, JSON body, and idempotency ke
   equal(captured?.init.body, JSON.stringify({ title: "事项" }));
 });
 
+test("api client unwraps backend data envelopes", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://api.local",
+    fetchImpl: async () => jsonResponse(200, { data: [{ id: "item-1" }] })
+  });
+
+  const result = await client.get<Array<{ id: string }>>("/site-items");
+
+  deepEqual(result, [{ id: "item-1" }]);
+});
+
 test("api client maps API errors", async () => {
   const client = new ApiClient({
     baseUrl: "http://api.local",
-    fetchImpl: async () => jsonResponse(403, { message: "Forbidden" })
+    fetchImpl: async () => jsonResponse(403, { error: { message: "Forbidden", details: null } })
   });
 
   await rejects(() => client.get("/audit/logs"), (error) => error instanceof ApiError && error.status === 403 && error.message === "Forbidden");

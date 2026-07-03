@@ -55,7 +55,7 @@
 
 - [x] 7.1 Run frontend typecheck and build in mock mode and API mode.
 - [x] 7.2 Run API typecheck/build/tests needed for contract confidence.
-- [ ] 7.3 Start local infrastructure and verify login, item list/detail, create item, workflow, photo upload/bind, notification, and desktop admin smoke paths.
-- [ ] 7.4 Verify mobile small viewport and desktop viewport still have no overlapping text or broken layout after API loading/error states.
+- [x] 7.3 Start local infrastructure and verify login, item list/detail, create item, workflow, photo upload/bind, notification, and desktop admin smoke paths.
+- [x] 7.4 Verify mobile small viewport and desktop viewport still have no overlapping text or broken layout after API loading/error states.
 - [x] 7.5 Update `docs/frontend-contracts.md` and backend setup docs with API mode environment variables and local startup steps.
 - [x] 7.6 Run `openspec validate frontend-api-integration --strict`.
