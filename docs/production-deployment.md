@@ -22,6 +22,7 @@ npm run prod:init-env -- --host 10.0.0.8 --smoke-username wang.supervisor --smok
 
 - `PUBLIC_API_BASE_URL`
 - `PUBLIC_WEB_BASE_URL`
+- `API_CORS_ORIGIN`
 
 常用可选参数：
 
@@ -36,7 +37,7 @@ npm run prod:init-env -- --host 10.0.0.8 --smoke-username wang.supervisor --smok
 2. 检查 `.env.production`：
 
 - `SMOKE_USERNAME` 和 `SMOKE_PASSWORD` 必须与后续创建或导入的真实生产账号一致，否则 `npm run prod:smoke` 会失败。
-- 如使用非默认端口、反向代理或域名，需要确认 `PUBLIC_API_BASE_URL` 和 `PUBLIC_WEB_BASE_URL` 是用户浏览器可访问的地址。
+- 如使用非默认端口、反向代理或域名，需要确认 `PUBLIC_API_BASE_URL` 和 `PUBLIC_WEB_BASE_URL` 是用户浏览器可访问的地址，且 `API_CORS_ORIGIN` 等于浏览器实际打开 Web 的源地址。
 - `.env.production` 含真实密钥，不应提交到 Git，也不要复制到不受控的位置。
 
 3. 准备备份目录：

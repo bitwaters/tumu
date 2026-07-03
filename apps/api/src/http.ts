@@ -107,7 +107,7 @@ export function createHttpServer(router: Router, config: ApiConfig) {
   return createServer(async (incoming, response) => {
     try {
       const method = incoming.method ?? "GET";
-      setCorsHeaders(response);
+      setCorsHeaders(response, config.corsAllowedOrigin);
       if (method === "OPTIONS") {
         response.statusCode = 204;
         response.end();
@@ -127,38 +127,40 @@ export function createHttpServer(router: Router, config: ApiConfig) {
         rawBody
       };
       const result = await matched.route.handler(apiRequest);
-      writeJson(response, 200, { data: result ?? null });
+      writeJson(response, 200, { data: result ?? null }, config.corsAllowedOrigin);
     } catch (error) {
-      handleError(response, error);
+      handleError(response, error, config.corsAllowedOrigin);
     }
   });
 }
 
-function handleError(response: ServerResponse, error: unknown): void {
+function handleError(response: ServerResponse, error: unknown, corsAllowedOrigin: string): void {
   if (error instanceof HttpError) {
-    writeJson(response, error.status, { error: { message: error.message, details: error.details ?? null } });
+    writeJson(response, error.status, { error: { message: error.message, details: error.details ?? null } }, corsAllowedOrigin);
     return;
   }
   if (error instanceof Error && error.message === "FORBIDDEN") {
-    writeJson(response, 403, { error: { message: "Forbidden" } });
+    writeJson(response, 403, { error: { message: "Forbidden" } }, corsAllowedOrigin);
     return;
   }
   if (error instanceof Error && error.message === "UNAUTHORIZED") {
-    writeJson(response, 401, { error: { message: "Unauthorized" } });
+    writeJson(response, 401, { error: { message: "Unauthorized" } }, corsAllowedOrigin);
     return;
   }
-  writeJson(response, 500, { error: { message: error instanceof Error ? error.message : "Internal server error" } });
+  writeJson(response, 500, { error: { message: error instanceof Error ? error.message : "Internal server error" } }, corsAllowedOrigin);
 }
 
-export function writeJson(response: ServerResponse, status: number, body: unknown): void {
+type JsonResponseTarget = Pick<ServerResponse, "setHeader" | "end"> & { statusCode: number };
+
+export function writeJson(response: JsonResponseTarget, status: number, body: unknown, corsAllowedOrigin = "*"): void {
   response.statusCode = status;
-  setCorsHeaders(response);
+  setCorsHeaders(response, corsAllowedOrigin);
   response.setHeader("content-type", "application/json; charset=utf-8");
   response.end(JSON.stringify(body));
 }
 
-function setCorsHeaders(response: ServerResponse): void {
-  response.setHeader("access-control-allow-origin", "*");
+export function setCorsHeaders(response: Pick<ServerResponse, "setHeader">, corsAllowedOrigin: string): void {
+  response.setHeader("access-control-allow-origin", corsAllowedOrigin);
   response.setHeader("access-control-allow-methods", "GET,POST,PATCH,DELETE,OPTIONS");
   response.setHeader("access-control-allow-headers", "authorization,content-type,idempotency-key");
 }

@@ -19,6 +19,7 @@ test("buildEnv requires a bare host and derives public URLs", () => {
 
   ok(content.includes("PUBLIC_API_BASE_URL=http://10.0.0.8:4100"));
   ok(content.includes("PUBLIC_WEB_BASE_URL=http://10.0.0.8:8088"));
+  ok(content.includes("API_CORS_ORIGIN=http://10.0.0.8:8088"));
   strictEqual(content.includes("CHANGE_ME"), false);
 });
 
@@ -32,6 +33,7 @@ test("run writes env file and refuses accidental overwrite", async () => {
 
   const content = await readFile(join(dir, "prod.env"), "utf8");
   ok(content.includes("PUBLIC_API_BASE_URL=http://site.local:4000"));
+  ok(content.includes("API_CORS_ORIGIN=http://site.local:8080"));
   ok(content.includes("SMOKE_PASSWORD=strong-smoke-password"));
   strictEqual(content.includes("CHANGE_ME"), false);
 

@@ -117,6 +117,7 @@ export function buildEnv(options) {
     `WEB_HOST_PORT=${options.webHostPort}`,
     `PUBLIC_API_BASE_URL=${publicApiBaseUrl}`,
     `PUBLIC_WEB_BASE_URL=${publicWebBaseUrl}`,
+    `API_CORS_ORIGIN=${publicWebBaseUrl}`,
     "",
     `S3_BUCKET=${options.s3Bucket}`,
     `S3_ACCESS_KEY=${secret(24)}`,

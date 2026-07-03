@@ -9,6 +9,7 @@ export interface ApiConfig {
   objectStorageAccessKey: string;
   objectStorageSecretKey: string;
   jwtSecret: string;
+  corsAllowedOrigin: string;
   uploadMaxBytes: number;
   idempotencyTtlHours: number;
 }
@@ -32,6 +33,7 @@ export function loadConfig(): ApiConfig {
     objectStorageAccessKey: process.env.S3_ACCESS_KEY ?? "minioadmin",
     objectStorageSecretKey: process.env.S3_SECRET_KEY ?? "minioadmin",
     jwtSecret: process.env.JWT_SECRET ?? "site-management-dev-secret",
+    corsAllowedOrigin: process.env.API_CORS_ORIGIN ?? "*",
     uploadMaxBytes: readNumber("UPLOAD_MAX_BYTES", 10 * 1024 * 1024),
     idempotencyTtlHours: readNumber("IDEMPOTENCY_TTL_HOURS", 24)
   };
