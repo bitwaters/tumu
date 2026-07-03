@@ -701,6 +701,29 @@ dd {
   object-fit: contain;
 }
 
+.drawing-preview-frame {
+  min-height: 520px;
+  padding: 0;
+}
+
+.drawing-preview-frame iframe {
+  width: 100%;
+  min-height: 520px;
+  border: 0;
+  background: var(--white);
+}
+
+.page-chip-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.compact-actions {
+  gap: 6px;
+}
+
 .notice,
 .list-row {
   width: 100%;
