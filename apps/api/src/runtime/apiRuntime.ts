@@ -4,6 +4,9 @@ import type { Router } from "../http.js";
 import type { Store } from "../types.js";
 import type { PrismaRuntime } from "./prisma.js";
 import { createLegacyMemoryRuntime } from "./legacyRuntime.js";
+import { buildPrismaRouter } from "../prismaRoutes.js";
+import { createHttpServer } from "../http.js";
+import { createPrismaRuntime } from "./prisma.js";
 
 export interface ApiRuntime {
   router: Router;
@@ -18,7 +21,20 @@ export async function createApiRuntime(config: ApiConfig): Promise<ApiRuntime> {
     return createLegacyMemoryRuntime(config);
   }
 
-  throw new Error(
-    "API_RUNTIME=prisma is configured, but Prisma-backed route wiring is not complete yet. Use API_RUNTIME=memory for legacy development until persistence migration tasks finish."
-  );
+  const prismaRuntime = createPrismaRuntime(config);
+  await prismaRuntime.connect();
+  const router = buildPrismaRouter(prismaRuntime.prisma, config);
+  const server = createHttpServer(router, config);
+
+  return {
+    router,
+    server,
+    prismaRuntime,
+    close: async () => {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+      await prismaRuntime.disconnect();
+    }
+  };
 }

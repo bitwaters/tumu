@@ -50,14 +50,14 @@ test("photo grouping ignores unrelated stages", () => {
   equal(grouped.review.length, 0);
 });
 
-test("runtime mode defaults to memory even when NODE_ENV is production", () => {
+test("runtime mode defaults to prisma even when NODE_ENV is production", () => {
   const originalRuntime = process.env.API_RUNTIME;
   const originalNodeEnv = process.env.NODE_ENV;
   delete process.env.API_RUNTIME;
   process.env.NODE_ENV = "production";
 
   try {
-    equal(loadConfig().runtimeMode, "memory");
+    equal(loadConfig().runtimeMode, "prisma");
   } finally {
     if (originalRuntime === undefined) {
       delete process.env.API_RUNTIME;

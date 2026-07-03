@@ -40,5 +40,5 @@ export function loadConfig(): ApiConfig {
 function readRuntimeMode(): ApiConfig["runtimeMode"] {
   const configured = process.env.API_RUNTIME;
   if (configured === "memory" || configured === "prisma") return configured;
-  return "memory";
+  return "prisma";
 }

@@ -60,54 +60,71 @@ export class MasterDataService {
   async create(kind: MasterDataKind, viewer: User, input: MasterDataCreateInput): Promise<MasterDataRecord> {
     requireAdmin(viewer);
     validateMasterDataInput(kind, input);
-    const projectId = await this.resolveProjectId();
-    const created = await this.createByKind(kind, normalizeCreateInput(input, projectId));
-    await this.auditRepository.create({
-      actorId: viewer.id,
-      action: "create",
-      resourceType: kind,
-      resourceId: created.id
+    return this.repository.transaction(async (context) => {
+      const repository = this.repository.withContext(context);
+      const auditRepository = this.auditRepository.withContext(context);
+      const projectId = await this.resolveProjectId(repository);
+      const created = await this.createByKind(repository, kind, normalizeCreateInput(input, projectId));
+      await auditRepository.create({
+        actorId: viewer.id,
+        action: "create",
+        resourceType: kind,
+        resourceId: created.id
+      });
+      return created;
     });
-    return created;
   }
 
   async update(kind: MasterDataKind, viewer: User, id: string, input: UpdateMasterDataInput): Promise<MasterDataRecord> {
     requireAdmin(viewer);
     validateMasterDataInput(kind, input, true);
-    const updated = await this.updateByKind(kind, id, input);
-    if (!updated) throw notFound(`${kind} not found`);
-    await this.auditRepository.create({
-      actorId: viewer.id,
-      action: "update",
-      resourceType: kind,
-      resourceId: id
+    return this.repository.transaction(async (context) => {
+      const repository = this.repository.withContext(context);
+      const auditRepository = this.auditRepository.withContext(context);
+      const updated = await this.updateByKind(repository, kind, id, input);
+      if (!updated) throw notFound(`${kind} not found`);
+      await auditRepository.create({
+        actorId: viewer.id,
+        action: "update",
+        resourceType: kind,
+        resourceId: id
+      });
+      return updated;
     });
-    return updated;
   }
 
-  private async resolveProjectId(): Promise<string> {
-    const projectId = await this.repository.findDefaultProjectId();
+  private async resolveProjectId(repository: MasterDataRepository): Promise<string> {
+    const projectId = await repository.findDefaultProjectId();
     if (!projectId) throw badRequest("project is not initialized");
     return projectId;
   }
 
-  private createByKind(kind: MasterDataKind, input: NormalizedMasterDataCreateInput): Promise<MasterDataRecord> {
-    if (kind === "sections") return this.repository.createSection(input);
+  private createByKind(
+    repository: MasterDataRepository,
+    kind: MasterDataKind,
+    input: NormalizedMasterDataCreateInput
+  ): Promise<MasterDataRecord> {
+    if (kind === "sections") return repository.createSection(input);
     if (kind === "organizations") {
-      return this.repository.createOrganization({
+      return repository.createOrganization({
         ...input,
         type: input.type ?? "contractor"
       });
     }
-    if (kind === "areas") return this.repository.createArea(input);
-    return this.repository.createDiscipline(input);
+    if (kind === "areas") return repository.createArea(input);
+    return repository.createDiscipline(input);
   }
 
-  private updateByKind(kind: MasterDataKind, id: string, input: UpdateMasterDataInput): Promise<MasterDataRecord | undefined> {
-    if (kind === "sections") return this.repository.updateSection(id, input);
-    if (kind === "organizations") return this.repository.updateOrganization(id, input);
-    if (kind === "areas") return this.repository.updateArea(id, input);
-    return this.repository.updateDiscipline(id, input);
+  private updateByKind(
+    repository: MasterDataRepository,
+    kind: MasterDataKind,
+    id: string,
+    input: UpdateMasterDataInput
+  ): Promise<MasterDataRecord | undefined> {
+    if (kind === "sections") return repository.updateSection(id, input);
+    if (kind === "organizations") return repository.updateOrganization(id, input);
+    if (kind === "areas") return repository.updateArea(id, input);
+    return repository.updateDiscipline(id, input);
   }
 }
 

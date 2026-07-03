@@ -40,6 +40,10 @@ export interface UpdateUserInput {
 export class UsersRepository {
   constructor(private readonly context: RepositoryContext) {}
 
+  withContext(context: RepositoryContext): UsersRepository {
+    return new UsersRepository(context);
+  }
+
   async list(filters: UserListFilters = {}): Promise<User[]> {
     const records = await this.context.prisma.user.findMany({
       where: {
@@ -172,5 +176,13 @@ export class UsersRepository {
       data: { passwordHash }
     });
     return result.count > 0;
+  }
+
+  async transaction<T>(callback: (context: RepositoryContext) => Promise<T>): Promise<T> {
+    const prisma = this.context.prisma;
+    if ("$transaction" in prisma) {
+      return prisma.$transaction((transactionClient) => callback({ prisma: transactionClient }));
+    }
+    return callback(this.context);
   }
 }

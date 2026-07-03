@@ -37,6 +37,10 @@ export type MasterDataRecord = Section | Organization | Area | Discipline;
 export class MasterDataRepository {
   constructor(private readonly context: RepositoryContext) {}
 
+  withContext(context: RepositoryContext): MasterDataRepository {
+    return new MasterDataRepository(context);
+  }
+
   async findDefaultProjectId(): Promise<string | undefined> {
     const project = await this.context.prisma.project.findFirst({
       select: { id: true },
@@ -155,6 +159,14 @@ export class MasterDataRepository {
       where: { id },
       data: pickMasterDataUpdate(input)
     });
+  }
+
+  async transaction<T>(callback: (context: RepositoryContext) => Promise<T>): Promise<T> {
+    const prisma = this.context.prisma;
+    if ("$transaction" in prisma) {
+      return prisma.$transaction((transactionClient) => callback({ prisma: transactionClient }));
+    }
+    return callback(this.context);
   }
 }
 

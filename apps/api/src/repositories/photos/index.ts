@@ -9,6 +9,15 @@ export interface PhotoListFilters {
   search?: string;
 }
 
+export interface CreateUnboundPhotoInput {
+  objectKey: string;
+  thumbnailKey: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  uploadedBy: string;
+}
+
 export class PhotosRepository {
   constructor(private readonly context: RepositoryContext) {}
 
@@ -29,6 +38,45 @@ export class PhotosRepository {
     });
 
     return record ? mapPhotoAttachmentRecord(record) : undefined;
+  }
+
+  async findById(photoId: string): Promise<PhotoAttachment | undefined> {
+    const record = await this.context.prisma.photoAttachment.findUnique({
+      where: { id: photoId }
+    });
+
+    return record ? mapPhotoAttachmentRecord(record) : undefined;
+  }
+
+  async createUnbound(input: CreateUnboundPhotoInput): Promise<PhotoAttachment> {
+    const record = await this.context.prisma.photoAttachment.create({
+      data: input
+    });
+
+    return mapPhotoAttachmentRecord(record);
+  }
+
+  async markDeleted(photoId: string, deletedAt = new Date()): Promise<PhotoAttachment | undefined> {
+    const exists = await this.context.prisma.photoAttachment.findUnique({
+      where: { id: photoId },
+      select: { id: true }
+    });
+    if (!exists) return undefined;
+
+    const record = await this.context.prisma.photoAttachment.update({
+      where: { id: photoId },
+      data: { deletedAt }
+    });
+
+    return mapPhotoAttachmentRecord(record);
+  }
+
+  async transaction<T>(callback: (context: RepositoryContext) => Promise<T>): Promise<T> {
+    const prisma = this.context.prisma;
+    if ("$transaction" in prisma) {
+      return prisma.$transaction((transactionClient) => callback({ prisma: transactionClient }));
+    }
+    return callback(this.context);
   }
 }
 

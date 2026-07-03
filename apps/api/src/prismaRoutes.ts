@@ -1,0 +1,263 @@
+import type { PrismaClient } from "@prisma/client";
+import type { ApiConfig } from "./config.js";
+import { badRequest, forbidden, unauthorized } from "./errors.js";
+import { assertRecord, readString, readStringArray, Router } from "./http.js";
+import { verifyToken } from "./security.js";
+import { ObjectStorageClient } from "./storage.js";
+import { AuditRepository } from "./repositories/audit/index.js";
+import { AuthRepository } from "./repositories/auth/index.js";
+import { DrawingsRepository } from "./repositories/drawings/index.js";
+import { IdempotencyRepository } from "./repositories/idempotency/index.js";
+import { MasterDataRepository } from "./repositories/master-data/index.js";
+import { NotificationsRepository } from "./repositories/notifications/index.js";
+import { PhotosRepository } from "./repositories/photos/index.js";
+import { SiteItemsRepository } from "./repositories/site-items/index.js";
+import { UsersRepository } from "./repositories/users/index.js";
+import { AuditService } from "./services/audit/index.js";
+import { AuthService } from "./services/auth/index.js";
+import { DrawingsService } from "./services/drawings/index.js";
+import { IdempotencyService } from "./services/idempotency/index.js";
+import { MasterDataService, type MasterDataKind } from "./services/master-data/index.js";
+import { NotificationsService } from "./services/notifications/index.js";
+import { PhotosService } from "./services/photos/index.js";
+import { SiteItemsService } from "./services/site-items/index.js";
+import { UsersService } from "./services/users/index.js";
+import type { Role, Severity, SiteItemStatus, SiteItemType, User, WorkflowAction } from "./types.js";
+
+export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Router {
+  const router = new Router();
+  const context = { prisma };
+  const storage = new ObjectStorageClient(config);
+
+  const auditRepository = new AuditRepository(context);
+  const authRepository = new AuthRepository(context);
+  const idempotencyRepository = new IdempotencyRepository(context);
+  const notificationsRepository = new NotificationsRepository(context);
+
+  const authService = new AuthService(authRepository, config, auditRepository);
+  const idempotencyService = new IdempotencyService(idempotencyRepository, config);
+  const usersService = new UsersService(new UsersRepository(context), auditRepository, idempotencyService);
+  const masterDataService = new MasterDataService(new MasterDataRepository(context), auditRepository);
+  const drawingsService = new DrawingsService(new DrawingsRepository(context), auditRepository);
+  const siteItemsService = new SiteItemsService(new SiteItemsRepository(context), auditRepository, idempotencyService, notificationsRepository);
+  const photosService = new PhotosService(new PhotosRepository(context), storage, config, idempotencyService, auditRepository);
+  const notificationsService = new NotificationsService(notificationsRepository);
+  const auditService = new AuditService(auditRepository);
+
+  async function viewer(request: Parameters<Router["add"]>[2] extends (request: infer R) => unknown ? R : never): Promise<User> {
+    const header = request.headers.authorization;
+    const raw = Array.isArray(header) ? header[0] : header;
+    if (!raw?.startsWith("Bearer ")) throw unauthorized();
+    const userId = verifyToken(raw.slice("Bearer ".length), config);
+    const user = await authRepository.findActiveUserById(userId);
+    if (!user) throw unauthorized();
+    return user;
+  }
+
+  router.add("GET", "/health", () => ({
+    service: "@site-management/api",
+    status: "ok",
+    time: new Date().toISOString()
+  }));
+
+  router.add("GET", "/ready", () => ({
+    status: "ok",
+    dependencies: {
+      postgresql: { status: "configured", url: redact(config.databaseUrl) },
+      redis: { status: "configured", url: config.redisUrl },
+      objectStorage: { status: "configured", endpoint: config.objectStorageEndpoint, bucket: config.objectStorageBucket }
+    }
+  }));
+
+  router.add("POST", "/auth/login", (request) => {
+    const body = assertRecord(request.body);
+    const account = readString(body, "username", false) ?? readString(body, "phone", false);
+    const password = readString(body, "password");
+    if (!account || !password) throw badRequest("username or phone is required");
+    return authService.login(account, password);
+  });
+
+  router.add("POST", "/auth/logout", async (request) => authService.logout(await viewer(request)));
+  router.add("GET", "/auth/me", async (request) => ({ user: await authService.currentUser((await viewer(request)).id) }));
+
+  router.add("GET", "/users", async (request) => {
+    const actor = await viewer(request);
+    if (actor.role !== "admin") throw forbidden();
+    return usersService.list({
+      search: queryString(request, "search"),
+      role: queryString(request, "role") as Role | undefined,
+      active: parseOptionalBoolean(request.query.get("active"))
+    });
+  });
+  router.add("POST", "/users", async (request) => {
+    const body = assertRecord(request.body);
+    return usersService.create(await viewer(request), {
+      organizationId: readString(body, "organizationId") ?? "",
+      name: readString(body, "name") ?? "",
+      phone: readString(body, "phone") ?? "",
+      username: readString(body, "username") ?? "",
+      role: (readString(body, "role") as Role | undefined) ?? "rectifier",
+      password: readString(body, "password", false),
+      sectionScopeIds: readStringArray(body, "sectionScopeIds")
+    }, idempotencyRequest(request));
+  });
+  router.add("PATCH", "/users/:id", async (request) => usersService.update(await viewer(request), request.params.id, pickDefined(assertRecord(request.body))));
+  router.add("PATCH", "/users/:id/disable", async (request) => usersService.disable(await viewer(request), request.params.id));
+  router.add("POST", "/users/:id/reset-password", async (request) => {
+    const body = request.body ? assertRecord(request.body) : {};
+    return usersService.resetPassword(await viewer(request), request.params.id, readString(body, "password", false));
+  });
+
+  registerMasterData(router, viewer, masterDataService, "sections");
+  registerMasterData(router, viewer, masterDataService, "organizations");
+  registerMasterData(router, viewer, masterDataService, "areas");
+  registerMasterData(router, viewer, masterDataService, "disciplines");
+
+  router.add("GET", "/drawings", async (request) =>
+    drawingsService.list(await viewer(request), {
+      areaId: queryString(request, "areaId"),
+      disciplineId: queryString(request, "disciplineId"),
+      search: queryString(request, "search")
+    })
+  );
+  router.add("POST", "/drawings", async (request) => {
+    const body = assertRecord(request.body);
+    return drawingsService.createDrawing(await viewer(request), {
+      areaId: readString(body, "areaId") ?? "",
+      disciplineId: readString(body, "disciplineId", false),
+      name: readString(body, "name") ?? "",
+      code: readString(body, "code") ?? ""
+    });
+  });
+  router.add("PATCH", "/drawings/:id", async (request) => drawingsService.updateDrawing(await viewer(request), request.params.id, pickDefined(assertRecord(request.body))));
+  router.add("POST", "/drawings/:id/revisions", async (request) => {
+    const body = assertRecord(request.body);
+    return drawingsService.createRevision(await viewer(request), {
+      drawingId: request.params.id,
+      revisionNo: readString(body, "revisionNo") ?? "",
+      fileKey: readString(body, "fileKey") ?? "",
+      coverPreviewKey: readString(body, "coverPreviewKey", false),
+      pageCount: Number(body.pageCount ?? 1),
+      isCurrent: Boolean(body.isCurrent)
+    });
+  });
+  router.add("GET", "/drawings/:id/revisions", async (request) => drawingsService.listRevisions(await viewer(request), request.params.id));
+  router.add("GET", "/drawing-revisions/:id/pages", async (request) => drawingsService.listPages(await viewer(request), request.params.id));
+  router.add("GET", "/drawing-revisions/:id/preview", async (request) => storage.createPreviewTarget(await drawingsService.previewKey(await viewer(request), request.params.id)));
+  router.add("PATCH", "/drawing-revisions/:id/current", async (request) => drawingsService.setCurrentRevision(await viewer(request), request.params.id));
+
+  router.add("GET", "/site-items", async (request) =>
+    siteItemsService.list(await viewer(request), {
+      search: queryString(request, "search"),
+      status: queryString(request, "status") as SiteItemStatus | undefined,
+      type: queryString(request, "type") as SiteItemType | undefined,
+      severity: queryString(request, "severity") as Severity | undefined,
+      sectionId: queryString(request, "sectionId"),
+      areaId: queryString(request, "areaId"),
+      disciplineId: queryString(request, "disciplineId"),
+      organizationId: queryString(request, "organizationId"),
+      overdue: request.query.get("overdue") === "true"
+    })
+  );
+  router.add("GET", "/site-items/:id", async (request) => siteItemsService.detail(await viewer(request), request.params.id));
+  router.add("POST", "/site-items", async (request) =>
+    siteItemsService.create(await viewer(request), pickDefined(assertRecord(request.body)), idempotencyRequest(request))
+  );
+  router.add("PATCH", "/site-items/:id", async (request) =>
+    siteItemsService.update(await viewer(request), request.params.id, pickDefined(assertRecord(request.body)), idempotencyRequest(request))
+  );
+  registerWorkflow(router, viewer, siteItemsService, "dispatch");
+  registerWorkflow(router, viewer, siteItemsService, "assign_rectifier", "assign-rectifier");
+  registerWorkflow(router, viewer, siteItemsService, "start_rectify", "start-rectify");
+  registerWorkflow(router, viewer, siteItemsService, "submit_review", "submit-review");
+  registerWorkflow(router, viewer, siteItemsService, "close");
+  registerWorkflow(router, viewer, siteItemsService, "void");
+  registerWorkflow(router, viewer, siteItemsService, "reopen");
+  registerWorkflow(router, viewer, siteItemsService, "comment", "comments");
+
+  router.add("POST", "/photos/presign", async (request) => photosService.presign(await viewer(request), pickDefined(assertRecord(request.body))));
+  router.add("POST", "/photos/complete", async (request) =>
+    photosService.completeUpload(await viewer(request), pickDefined(assertRecord(request.body)), idempotencyRequest(request))
+  );
+  router.add("GET", "/photos", async (request) =>
+    photosService.list(await viewer(request), {
+      unboundOnly: request.query.get("unboundOnly") === "true",
+      search: queryString(request, "search")
+    })
+  );
+  router.add("GET", "/photos/:id/preview", async (request) => photosService.preview(await viewer(request), request.params.id));
+  router.add("DELETE", "/photos/:id", async (request) => photosService.delete(await viewer(request), request.params.id, idempotencyRequest(request)));
+
+  router.add("GET", "/notifications", async (request) => notificationsService.list(await viewer(request)));
+  router.add("GET", "/notifications/unread-count", async (request) => notificationsService.unreadCount(await viewer(request)));
+  router.add("POST", "/notifications/:id/read", async (request) => notificationsService.markRead(await viewer(request), request.params.id));
+  router.add("POST", "/notifications/read-all", async (request) => notificationsService.markAllRead(await viewer(request)));
+  router.add("GET", "/audit/logs", async (request) =>
+    auditService.list(await viewer(request), {
+      resourceType: queryString(request, "resourceType"),
+      action: queryString(request, "action")
+    })
+  );
+
+  return router;
+}
+
+type ViewerResolver = (request: Parameters<Router["add"]>[2] extends (request: infer R) => unknown ? R : never) => Promise<User>;
+
+function registerMasterData(router: Router, viewer: ViewerResolver, service: MasterDataService, kind: MasterDataKind): void {
+  router.add("GET", `/master-data/${kind}`, async (request) => listMasterData(service, kind, await viewer(request), request.query.get("includeInactive") === "true"));
+  router.add("POST", `/master-data/${kind}`, async (request) => createMasterData(service, kind, await viewer(request), pickDefined(assertRecord(request.body))));
+  router.add("PATCH", `/master-data/${kind}/:id`, async (request) => service.update(kind, await viewer(request), request.params.id, pickDefined(assertRecord(request.body))));
+}
+
+function registerWorkflow(router: Router, viewer: ViewerResolver, service: SiteItemsService, action: WorkflowAction, path: string = action): void {
+  router.add("POST", `/site-items/:id/${path}`, async (request) =>
+    service.transition(await viewer(request), request.params.id, action, pickDefined((request.body ? assertRecord(request.body) : {}) as Record<string, unknown>), idempotencyRequest(request))
+  );
+}
+
+function listMasterData(service: MasterDataService, kind: MasterDataKind, viewer: User, includeInactive: boolean) {
+  if (kind === "sections") return service.list("sections", viewer, includeInactive);
+  if (kind === "organizations") return service.list("organizations", viewer, includeInactive);
+  if (kind === "areas") return service.list("areas", viewer, includeInactive);
+  return service.list("disciplines", viewer, includeInactive);
+}
+
+function createMasterData(service: MasterDataService, kind: MasterDataKind, viewer: User, input: Record<string, unknown>) {
+  const normalized = {
+    name: typeof input.name === "string" ? input.name : undefined,
+    code: typeof input.code === "string" ? input.code : undefined,
+    type: typeof input.type === "string" ? input.type : undefined,
+    parentId: typeof input.parentId === "string" ? input.parentId : undefined
+  };
+  const create = service.create as unknown as (targetKind: MasterDataKind, actor: User, body: typeof normalized) => Promise<unknown>;
+  return create.call(service, kind, viewer, normalized);
+}
+
+function idempotencyRequest(request: Parameters<Router["add"]>[2] extends (request: infer R) => unknown ? R : never) {
+  const header = request.headers["idempotency-key"];
+  return {
+    method: request.method,
+    path: request.path,
+    key: Array.isArray(header) ? header[0] : header
+  };
+}
+
+function queryString(request: Parameters<Router["add"]>[2] extends (request: infer R) => unknown ? R : never, key: string): string | undefined {
+  return request.query.get(key) ?? undefined;
+}
+
+function parseOptionalBoolean(value: string | null): boolean | undefined {
+  if (value === null) return undefined;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return undefined;
+}
+
+function pickDefined<T extends Record<string, unknown>>(input: T): T {
+  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)) as T;
+}
+
+function redact(value: string): string {
+  return value.replace(/:\/\/([^:]+):([^@]+)@/, "://$1:***@");
+}

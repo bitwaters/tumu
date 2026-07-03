@@ -11,7 +11,7 @@
 - [x] 2.1 Add documented test database environment variables and npm scripts for PostgreSQL-backed API tests.
 - [x] 2.2 Add a test setup helper that applies migrations and loads seed data before integration tests.
 - [x] 2.3 Add a test teardown/reset strategy that keeps tests repeatable without depending on manual Docker cleanup.
-- [ ] 2.4 Convert the route test harness to construct the API with Prisma-backed services.
+- [x] 2.4 Convert the route test harness to construct the API with Prisma-backed services.
 - [x] 2.5 Keep fast unit tests for pure authorization and mapper helpers where useful.
 
 ## 3. Read Path Migration
@@ -33,31 +33,31 @@ Route wiring remains tracked by 2.4 and contract parity remains tracked by secti
 - [x] 4.1 Implement repository/service login audit, logout audit, user create/update/disable/reset-password, and user-scope writes.
 - [x] 4.2 Implement repository/service master-data create/update writes with admin-only authorization and audit logging.
 - [x] 4.3 Implement repository/service drawing create/update, revision upload metadata, page creation, and set-current writes with audit logging.
-- [ ] 4.4 Implement photo presign/complete/delete writes with personal-gallery ownership and idempotency.
-- [ ] 4.5 Implement site-item create/edit writes with responsibility validation, discovery photo binding, workflow log, audit log, and idempotency.
-- [ ] 4.6 Implement dispatch, assign-rectifier, start-rectify, submit-review, close, void, reopen, and comment workflow transitions.
-- [ ] 4.7 Implement notification creation and audit creation inside workflow transactions.
+- [x] 4.4 Implement photo presign/complete/delete writes with personal-gallery ownership and idempotency.
+- [x] 4.5 Implement site-item create/edit writes with responsibility validation, discovery photo binding, workflow log, audit log, and idempotency.
+- [x] 4.6 Implement dispatch, assign-rectifier, start-rectify, submit-review, close, void, reopen, and comment workflow transitions.
+- [x] 4.7 Implement notification creation and audit creation inside workflow transactions.
 
 ## 5. Transactions And Idempotency
 
-- [ ] 5.1 Replace `withStoreTransaction` runtime use with Prisma `$transaction` for all multi-record writes.
-- [ ] 5.2 Move idempotency lookup, request-hash comparison, response replay, conflict detection, and record creation to PostgreSQL.
-- [ ] 5.3 Ensure identical retries return the original response body and mismatched retries return 409 without applying mutations.
-- [ ] 5.4 Add tests for failed item creation rollback, failed workflow rollback, and idempotent replay against PostgreSQL.
+- [x] 5.1 Replace `withStoreTransaction` runtime use with Prisma `$transaction` for all multi-record writes.
+- [x] 5.2 Move idempotency lookup, request-hash comparison, response replay, conflict detection, and record creation to PostgreSQL.
+- [x] 5.3 Ensure identical retries return the original response body and mismatched retries return 409 without applying mutations.
+- [x] 5.4 Add tests for failed item creation rollback, failed workflow rollback, and idempotent replay against PostgreSQL.
 
 ## 6. Contract Parity Verification
 
-- [ ] 6.1 Port auth/current-user tests to PostgreSQL-backed services.
-- [ ] 6.2 Port user and master-data permission tests to PostgreSQL-backed services.
-- [ ] 6.3 Port drawing visibility, revision, page, preview, and current-version tests to PostgreSQL-backed services.
-- [ ] 6.4 Port site-item list/detail/create/edit/workflow tests to PostgreSQL-backed services.
-- [ ] 6.5 Port photo gallery, binding, preview, and delete tests to PostgreSQL-backed services.
-- [ ] 6.6 Port notification, unread-count, audit query, and idempotency tests to PostgreSQL-backed services.
-- [ ] 6.7 Add restart persistence verification showing a created durable record remains after reconstructing the API service.
+- [x] 6.1 Port auth/current-user tests to PostgreSQL-backed services.
+- [x] 6.2 Port user and master-data permission tests to PostgreSQL-backed services.
+- [x] 6.3 Port drawing visibility, revision, page, preview, and current-version tests to PostgreSQL-backed services.
+- [x] 6.4 Port site-item list/detail/create/edit/workflow tests to PostgreSQL-backed services.
+- [x] 6.5 Port photo gallery, binding, preview, and delete tests to PostgreSQL-backed services.
+- [x] 6.6 Port notification, unread-count, audit query, and idempotency tests to PostgreSQL-backed services.
+- [x] 6.7 Add restart persistence verification showing a created durable record remains after reconstructing the API service.
 
 ## 7. Cleanup And Documentation
 
-- [ ] 7.1 Remove or quarantine in-memory route runtime code once Prisma-backed parity tests pass.
-- [ ] 7.2 Update backend setup docs with the PostgreSQL-backed test workflow and any required Prisma Client adapter notes.
-- [ ] 7.3 Run Prisma generate, migration, seed, typecheck, build, PostgreSQL-backed tests, and OpenSpec strict validation.
-- [ ] 7.4 Confirm no API endpoint names, request body fields, or frontend-facing response shapes changed unexpectedly.
+- [x] 7.1 Remove or quarantine in-memory route runtime code once Prisma-backed parity tests pass.
+- [x] 7.2 Update backend setup docs with the PostgreSQL-backed test workflow and any required Prisma Client adapter notes.
+- [x] 7.3 Run Prisma generate, migration, seed, typecheck, build, PostgreSQL-backed tests, and OpenSpec strict validation.
+- [x] 7.4 Confirm no API endpoint names, request body fields, or frontend-facing response shapes changed unexpectedly.
