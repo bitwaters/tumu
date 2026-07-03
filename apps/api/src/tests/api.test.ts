@@ -46,6 +46,28 @@ test("auth returns current user and rejects disabled users", async () => {
   await rejects(() => request("POST", "/auth/login", { username: "wang.supervisor", password: "password123" }));
 });
 
+test("current user can change password with audit trail", async () => {
+  const { store, request } = createHarness();
+  const token = await login(request, "wang.supervisor");
+
+  await rejects(() =>
+    request("POST", "/auth/change-password", { currentPassword: "wrong-password", newPassword: "new-password-1" }, token)
+  );
+  await login(request, "wang.supervisor", "password123");
+
+  const result = (await request(
+    "POST",
+    "/auth/change-password",
+    { currentPassword: "password123", newPassword: "new-password-1" },
+    token
+  )) as { ok: true };
+
+  equal(result.ok, true);
+  await rejects(() => login(request, "wang.supervisor", "password123"));
+  await login(request, "wang.supervisor", "new-password-1");
+  ok(store.auditLogs.some((log) => log.actorId === "u-supervisor" && log.action === "change_password"));
+});
+
 test("admin can manage users, non-admin cannot", async () => {
   const { store, request } = createHarness();
   const adminToken = await login(request, "admin", "admin123");

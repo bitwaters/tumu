@@ -53,7 +53,7 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
   const masterDataRepository = new MasterDataRepository(context);
   const usersRepository = new UsersRepository(context);
 
-  const authService = new AuthService(authRepository, config, auditRepository);
+  const authService = new AuthService(authRepository, config, auditRepository, usersRepository);
   const idempotencyService = new IdempotencyService(idempotencyRepository, config);
   const usersService = new UsersService(usersRepository, auditRepository, idempotencyService);
   const masterDataService = new MasterDataService(masterDataRepository, auditRepository);
@@ -98,6 +98,10 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
 
   router.add("POST", "/auth/logout", async (request) => authService.logout(await viewer(request)));
   router.add("GET", "/auth/me", async (request) => ({ user: await authService.currentUser((await viewer(request)).id) }));
+  router.add("POST", "/auth/change-password", async (request) => {
+    const body = assertRecord(request.body);
+    return authService.changePassword(await viewer(request), readString(body, "currentPassword", false), readString(body, "newPassword", false));
+  });
 
   router.add("GET", "/users", async (request) => {
     const actor = await viewer(request);

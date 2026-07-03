@@ -98,6 +98,20 @@ export function buildRouter(store: Store, config: ApiConfig): Router {
     return { user: publicUser(requireContext(request).user) };
   });
 
+  router.add("POST", "/auth/change-password", (request) => {
+    authenticate(request, store, config);
+    const { user } = requireContext(request);
+    const body = assertRecord(request.body);
+    const currentPassword = readString(body, "currentPassword", false);
+    const newPassword = readString(body, "newPassword", false);
+    if (!currentPassword || !newPassword) throw badRequest("currentPassword and newPassword are required");
+    if (newPassword.length < 8) throw badRequest("newPassword must be at least 8 characters");
+    if (!verifyPassword(currentPassword, user.passwordHash)) throw unauthorized("Invalid current password");
+    user.passwordHash = hashPassword(newPassword);
+    writeAudit(store, user.id, "change_password", "User", user.id);
+    return { ok: true };
+  });
+
   router.add("GET", "/users", (request) => {
     authenticate(request, store, config);
     const { user } = requireContext(request);

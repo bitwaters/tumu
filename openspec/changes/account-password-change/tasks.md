@@ -1,8 +1,8 @@
 ## 1. Backend Password Change
 
-- [ ] 1.1 Add authenticated `POST /auth/change-password` route for memory and Prisma runtimes.
-- [ ] 1.2 Add auth service/repository support to verify the current password, hash the new password, update the current user, and write `change_password` audit records.
-- [ ] 1.3 Add API tests for successful password change, old-password rejection, login with the new password, and audit creation.
+- [x] 1.1 Add authenticated `POST /auth/change-password` route for memory and Prisma runtimes.
+- [x] 1.2 Add auth service/repository support to verify the current password, hash the new password, update the current user, and write `change_password` audit records.
+- [x] 1.3 Add API tests for successful password change, old-password rejection, login with the new password, and audit creation.
 
 ## 2. Frontend Profile Integration
 
