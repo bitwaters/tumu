@@ -99,6 +99,7 @@ export class UsersService {
 
   async disable(viewer: User, userId: string): Promise<PublicUser> {
     requireAdmin(viewer);
+    if (viewer.id === userId) throw badRequest("cannot disable your own account");
     return this.repository.transaction(async (context) => {
       const repository = this.repository.withContext(context);
       const auditRepository = this.auditRepository.withContext(context);

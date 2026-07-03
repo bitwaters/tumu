@@ -10,7 +10,7 @@ import { NotificationsApi } from "./api/notifications";
 import { PhotosApi, type PhotoCompleteInput, type PhotoListQuery } from "./api/photos";
 import { SiteItemsApi, flattenGroupedPhotos, type CreateSiteItemInput, type SiteItemDetailPayload, type SiteItemListQuery, type SiteItemWorkflowInput, type UpdateSiteItemInput } from "./api/siteItems";
 import { clearStoredToken, readStoredToken, saveStoredToken } from "./api/session";
-import { UsersApi } from "./api/users";
+import { UsersApi, type UserWriteInput } from "./api/users";
 import {
   areas,
   auditLogs,
@@ -432,7 +432,7 @@ function useAppState() {
     try {
       const [masterData, loadedUsers] = await Promise.all([
         masterDataApi.all(),
-        usersApi.visible({ active: true })
+        usersApi.visible()
       ]);
       setDirectory({ ...masterData, users: loadedUsers });
       setDataError(null);
@@ -511,6 +511,89 @@ function useAppState() {
       }
       return { ...prev, sections: prev.sections.map((item) => (item.id === record.id ? { ...item, ...input } : item)) };
     });
+    setDataError(null);
+    return true;
+  }
+
+  async function createUser(input: UserWriteInput, requestKey: string): Promise<boolean> {
+    if (!currentUser || currentUser.role !== "admin") return false;
+    if (!runtimeConfig.useMocks) {
+      const key = apiIdempotencyKeys.current.get(requestKey, "admin-write");
+      try {
+        await usersApi.create(input, key);
+        apiIdempotencyKeys.current.clear(requestKey);
+        await refreshDirectory();
+        setDataError(null);
+        return true;
+      } catch (error) {
+        setDataError(errorMessage(error));
+        return false;
+      }
+    }
+    const newUser: User = {
+      id: `user-${Date.now()}`,
+      organizationId: input.organizationId || directory.organizations[0]?.id || "",
+      name: input.name || "未命名用户",
+      phone: input.phone || "",
+      username: input.username || `user-${Date.now()}`,
+      role: input.role || "rectifier",
+      isActive: input.isActive ?? true,
+      sectionScopeIds: input.sectionScopeIds || directory.sections.map((section) => section.id)
+    };
+    setDirectory((prev) => ({ ...prev, users: [newUser, ...prev.users] }));
+    setDataError(null);
+    return true;
+  }
+
+  async function updateUser(record: User, input: UserWriteInput): Promise<boolean> {
+    if (!currentUser || currentUser.role !== "admin") return false;
+    if (!runtimeConfig.useMocks) {
+      try {
+        await usersApi.update(record.id, input);
+        await refreshDirectory();
+        setDataError(null);
+        return true;
+      } catch (error) {
+        setDataError(errorMessage(error));
+        return false;
+      }
+    }
+    setDirectory((prev) => ({
+      ...prev,
+      users: prev.users.map((user) => (user.id === record.id ? { ...user, ...input, sectionScopeIds: input.sectionScopeIds || user.sectionScopeIds } : user))
+    }));
+    setDataError(null);
+    return true;
+  }
+
+  async function disableUser(record: User): Promise<boolean> {
+    if (!currentUser || currentUser.role !== "admin") return false;
+    if (!runtimeConfig.useMocks) {
+      try {
+        await usersApi.disable(record.id);
+        await refreshDirectory();
+        setDataError(null);
+        return true;
+      } catch (error) {
+        setDataError(errorMessage(error));
+        return false;
+      }
+    }
+    return updateUser(record, { isActive: false });
+  }
+
+  async function resetUserPassword(record: User, password?: string): Promise<boolean> {
+    if (!currentUser || currentUser.role !== "admin") return false;
+    if (!runtimeConfig.useMocks) {
+      try {
+        await usersApi.resetPassword(record.id, password);
+        setDataError(null);
+        return true;
+      } catch (error) {
+        setDataError(errorMessage(error));
+        return false;
+      }
+    }
     setDataError(null);
     return true;
   }
@@ -1178,6 +1261,10 @@ function useAppState() {
     refreshDirectory,
     createMasterData,
     updateMasterData,
+    createUser,
+    updateUser,
+    disableUser,
+    resetUserPassword,
     refreshDrawings,
     refreshDrawingRevisions,
     refreshDrawingPages,
@@ -3017,24 +3104,197 @@ function masterDataMeta(kind: MasterDataKind, record: MasterDataRecord): string 
 }
 
 function UsersPage({ state }: { state: AppState }) {
+  const [editing, setEditing] = useState<User | "new" | null>(null);
+  const [resetting, setResetting] = useState<User | null>(null);
   useEffect(() => {
     void state.refreshDirectory();
   }, [state.refreshDirectory]);
   return (
     <div className="stack">
-      <PageHeader title="用户与权限" meta="角色、单位、标段授权" action={<Button>创建用户</Button>} />
+      <PageHeader title="用户与权限" meta="角色、单位、标段授权" action={<Button onClick={() => setEditing("new")}>创建用户</Button>} />
       {state.directoryState === "loading" ? <p className="muted">正在刷新用户目录...</p> : null}
       {state.directoryState === "error" && state.dataError ? <p className="error-text">{state.dataError}</p> : null}
+      {editing ? (
+        <Card>
+          <UserForm
+            state={state}
+            user={editing === "new" ? undefined : editing}
+            onCancel={() => setEditing(null)}
+            onSaved={() => setEditing(null)}
+          />
+        </Card>
+      ) : null}
+      {resetting ? (
+        <Card>
+          <PasswordResetForm
+            state={state}
+            user={resetting}
+            onCancel={() => setResetting(null)}
+            onSaved={() => setResetting(null)}
+          />
+        </Card>
+      ) : null}
       <DataTable
-        columns={["姓名", "角色", "单位", "状态", "授权标段"]}
+        columns={["姓名", "角色", "单位", "状态", "授权标段", "操作"]}
         rows={state.directory.users.map((user) => [
           user.name,
           roleLabel(user.role),
           directoryItem(state.directory.organizations, user.organizationId)?.name || "-",
           user.isActive ? "启用" : "停用",
-          user.sectionScopeIds.map((id) => directoryItem(state.directory.sections, id)?.name).join("、")
+          user.sectionScopeIds.map((id) => directoryItem(state.directory.sections, id)?.name).join("、"),
+          <div className="action-row compact-actions" key={user.id}>
+            <Button variant="secondary" onClick={() => setEditing(user)}>编辑</Button>
+            <Button variant="ghost" onClick={() => setResetting(user)}>重置密码</Button>
+            {user.isActive && state.currentUser?.id !== user.id ? <Button variant="danger" onClick={() => state.disableUser(user)}>禁用</Button> : null}
+          </div>
         ])}
       />
+    </div>
+  );
+}
+
+function UserForm({
+  state,
+  user,
+  onCancel,
+  onSaved
+}: {
+  state: AppState;
+  user?: User;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const [requestKey] = useState(() => uniqueId("user-create"));
+  const activeOrganizations = useMemo(() => state.directory.organizations.filter((organization) => organization.isActive), [state.directory.organizations]);
+  const activeSections = useMemo(() => state.directory.sections.filter((section) => section.isActive), [state.directory.sections]);
+  const [values, setValues] = useState<UserWriteInput>({
+    organizationId: user?.organizationId || activeOrganizations[0]?.id || "",
+    name: user?.name || "",
+    phone: user?.phone || "",
+    username: user?.username || "",
+    role: user?.role || "rectifier",
+    password: "",
+    isActive: user?.isActive ?? true,
+    sectionScopeIds: user?.sectionScopeIds || activeSections.map((section) => section.id)
+  });
+  const organizationOptions = useMemo(
+    () =>
+      values.role === "contractor_manager" || values.role === "rectifier"
+        ? activeOrganizations.filter((organization) => organization.type === "contractor")
+        : activeOrganizations,
+    [activeOrganizations, values.role]
+  );
+  useEffect(() => {
+    if (organizationOptions.length && !organizationOptions.some((organization) => organization.id === values.organizationId)) {
+      setValues((prev) => ({ ...prev, organizationId: organizationOptions[0].id }));
+    }
+  }, [organizationOptions, values.organizationId]);
+  const canSave = Boolean(values.organizationId && values.name?.trim() && values.phone?.trim() && values.username?.trim() && values.role && values.sectionScopeIds?.length);
+  function toggleSection(sectionId: string) {
+    const selected = new Set(values.sectionScopeIds || []);
+    if (selected.has(sectionId)) selected.delete(sectionId);
+    else selected.add(sectionId);
+    setValues({ ...values, sectionScopeIds: Array.from(selected) });
+  }
+  async function save() {
+    if (!canSave) return;
+    const input: UserWriteInput = {
+      organizationId: values.organizationId,
+      name: values.name,
+      phone: values.phone,
+      username: values.username,
+      role: values.role,
+      password: values.password || undefined,
+      isActive: values.isActive,
+      sectionScopeIds: values.sectionScopeIds
+    };
+    const saved = user
+      ? await state.updateUser(user, input)
+      : await state.createUser(input, requestKey);
+    if (saved) onSaved();
+  }
+  return (
+    <div className="inline-editor">
+      <div className="card-title-row">
+        <h3>{user ? "编辑用户" : "创建用户"}</h3>
+        <Button variant="ghost" onClick={onCancel}>取消</Button>
+      </div>
+      <div className="form-grid">
+        <Field label="姓名">
+          <TextInput value={values.name || ""} onChange={(event) => setValues({ ...values, name: event.target.value })} />
+        </Field>
+        <Field label="手机号">
+          <TextInput value={values.phone || ""} onChange={(event) => setValues({ ...values, phone: event.target.value })} />
+        </Field>
+        <Field label="登录名">
+          <TextInput value={values.username || ""} onChange={(event) => setValues({ ...values, username: event.target.value })} />
+        </Field>
+        <Field label="角色">
+          <Select value={values.role} onChange={(event) => setValues({ ...values, role: event.target.value as User["role"] })}>
+            <option value="admin">管理员</option>
+            <option value="supervisor">业主/监理</option>
+            <option value="contractor_manager">施工单位负责人</option>
+            <option value="rectifier">现场整改人</option>
+          </Select>
+        </Field>
+        <Field label="单位">
+          <Select value={values.organizationId} onChange={(event) => setValues({ ...values, organizationId: event.target.value })}>
+            {organizationOptions.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}
+          </Select>
+        </Field>
+        {!user ? (
+          <Field label="初始密码">
+            <TextInput value={values.password || ""} onChange={(event) => setValues({ ...values, password: event.target.value })} placeholder="留空默认 password123" />
+          </Field>
+        ) : null}
+        <Field label="状态">
+          <Select value={values.isActive ? "active" : "inactive"} onChange={(event) => setValues({ ...values, isActive: event.target.value === "active" })}>
+            <option value="active">启用</option>
+            <option value="inactive">停用</option>
+          </Select>
+        </Field>
+      </div>
+      <div className="section-checks">
+        <strong>授权标段</strong>
+        <div>
+          {activeSections.map((section) => (
+            <label key={section.id} className="check-pill">
+              <input type="checkbox" checked={values.sectionScopeIds?.includes(section.id) || false} onChange={() => toggleSection(section.id)} />
+              <span>{section.name}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      {state.dataError ? <p className="error-text">{state.dataError}</p> : null}
+      <div className="action-row">
+        <Button variant="secondary" onClick={onCancel}>取消</Button>
+        <Button disabled={!canSave} onClick={save}>保存</Button>
+      </div>
+    </div>
+  );
+}
+
+function PasswordResetForm({ state, user, onCancel, onSaved }: { state: AppState; user: User; onCancel: () => void; onSaved: () => void }) {
+  const [password, setPassword] = useState("");
+  async function save() {
+    const saved = await state.resetUserPassword(user, password || undefined);
+    if (saved) onSaved();
+  }
+  return (
+    <div className="inline-editor">
+      <div className="card-title-row">
+        <h3>重置密码</h3>
+        <Button variant="ghost" onClick={onCancel}>取消</Button>
+      </div>
+      <p className="muted">{user.name} · 留空将重置为 password123</p>
+      <Field label="新密码">
+        <TextInput value={password} onChange={(event) => setPassword(event.target.value)} />
+      </Field>
+      {state.dataError ? <p className="error-text">{state.dataError}</p> : null}
+      <div className="action-row">
+        <Button variant="secondary" onClick={onCancel}>取消</Button>
+        <Button onClick={save}>确认重置</Button>
+      </div>
     </div>
   );
 }

@@ -727,6 +727,27 @@ dd {
   border-top: 1px solid var(--gray-20);
 }
 
+.section-checks {
+  display: grid;
+  gap: 8px;
+}
+
+.section-checks > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.check-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--gray-20);
+  border-radius: 4px;
+  background: var(--gray-10);
+}
+
 .compact-actions {
   gap: 6px;
 }
