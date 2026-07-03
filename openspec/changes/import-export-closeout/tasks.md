@@ -33,6 +33,6 @@
 ## 5. Documentation And Verification
 
 - [x] 5.1 Update API/frontend contract docs with import/export endpoints and payloads.
-- [ ] 5.2 Run API typecheck/build/tests and frontend typecheck/build/tests.
-- [ ] 5.3 Run production compose config validation after dependency changes.
-- [ ] 5.4 Run `openspec validate import-export-closeout --strict`.
+- [x] 5.2 Run API typecheck/build/tests and frontend typecheck/build/tests.
+- [x] 5.3 Run production compose config validation after dependency changes.
+- [x] 5.4 Run `openspec validate import-export-closeout --strict`.
