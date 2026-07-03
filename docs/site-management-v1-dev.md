@@ -611,6 +611,7 @@ export/
 - `POST /auth/login`：账号密码登录。
 - `POST /auth/logout`：退出登录。
 - `GET /auth/me`：获取当前用户。
+- `POST /auth/change-password`：当前用户修改自己的密码，需提交当前密码和新密码；成功后旧 Token 失效。
 
 ### 13.2 Users
 
@@ -837,7 +838,7 @@ export/
 - 密码必须哈希保存。
 - 登录失败次数过多应短时间限制。
 - Token 设置过期时间。
-- 修改密码后旧 Token 失效。
+- Token 必须绑定当前密码哈希摘要，修改密码后旧 Token 失效，前端清除本地会话并要求重新登录。
 
 ### 16.2 数据权限
 

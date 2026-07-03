@@ -12,6 +12,6 @@
 
 ## 3. Documentation And Verification
 
-- [ ] 3.1 Update API/frontend contract docs and v1 development docs with password-change behavior.
-- [ ] 3.2 Run API typecheck/build/tests and frontend typecheck/build/tests.
-- [ ] 3.3 Run `openspec validate account-password-change --strict`.
+- [x] 3.1 Update API/frontend contract docs and v1 development docs with password-change behavior.
+- [x] 3.2 Run API typecheck/build/tests and frontend typecheck/build/tests.
+- [x] 3.3 Run `openspec validate account-password-change --strict`.

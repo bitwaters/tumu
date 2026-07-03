@@ -67,6 +67,8 @@
 - 默认使用 API 模式，`VITE_API_BASE_URL` 未配置时连接 `http://127.0.0.1:4000`。
 - 只有显式设置 `VITE_USE_MOCKS=true` 时才进入 mock 原型模式；mock 模式保留本地角色切换和本地状态变更。
 - API 模式登录使用后端 `/auth/login`，刷新页面后通过 `/auth/me` 恢复当前用户。
+- 个人页修改密码使用 `/auth/change-password`，请求体为 `{ "currentPassword": "...", "newPassword": "..." }`；成功后前端必须清除本地会话并返回登录页。
+- 后端签发 Token 时绑定当前密码哈希摘要；修改密码后，旧 Token 调用任何认证接口都必须失败。
 - API 模式的事项列表、详情、流程动作、图库、照片预览、照片上传、删除和通知均通过后端接口；失败时显示错误，不自动回退到 mock 数据。
 - 本地验证 API 模式时应先启动 PostgreSQL、MinIO、API，再启动 Web。照片上传依赖 MinIO/S3 上传地址可访问。
 
