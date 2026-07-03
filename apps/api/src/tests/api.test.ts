@@ -288,6 +288,38 @@ test("notifications and audit query are scoped", async () => {
   ok(Array.isArray(logs));
 });
 
+test("site item ledger export is scoped and downloadable", async () => {
+  const { request } = createHarness();
+  const supervisorToken = await login(request, "wang.supervisor");
+  const rectifierToken = await login(request, "zhao.fix");
+  const installRectifierToken = await login(request, "chen.fix");
+
+  const job = (await request("POST", "/exports/site-items", { sectionId: "sec-civil-a" }, supervisorToken)) as {
+    id: string;
+    status: string;
+    artifactFileName?: string;
+  };
+  equal(job.status, "succeeded");
+  ok(job.artifactFileName?.endsWith(".csv"));
+
+  const status = (await request("GET", `/exports/${job.id}`, undefined, supervisorToken)) as { id: string; status: string };
+  equal(status.id, job.id);
+  equal(status.status, "succeeded");
+
+  const download = (await request("GET", `/exports/${job.id}/download`, undefined, supervisorToken)) as {
+    fileName: string;
+    mimeType: string;
+    contentBase64: string;
+  };
+  equal(download.mimeType, "text/csv; charset=utf-8");
+  const csv = Buffer.from(download.contentBase64, "base64").toString("utf8");
+  ok(csv.includes("ITEM-2026-0001"));
+  ok(!csv.includes("ITEM-2026-0002"));
+
+  await rejects(() => request("POST", "/exports/site-items", {}, rectifierToken));
+  await rejects(() => request("GET", `/exports/${job.id}/download`, undefined, installRectifierToken));
+});
+
 async function rejects(fn: () => Promise<unknown>): Promise<void> {
   let rejected = false;
   try {

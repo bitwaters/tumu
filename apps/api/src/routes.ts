@@ -16,6 +16,11 @@ import { writeAudit } from "./audit.js";
 import { hashPassword, issueToken, verifyPassword } from "./security.js";
 import { withStoreTransaction } from "./transaction.js";
 import {
+  buildSiteItemLedgerExport,
+  canCreateSiteItemLedgerExport,
+  readGeneratedExportArtifact
+} from "./services/import-export/index.js";
+import {
   canAccessItem,
   canAccessSection,
   canAssignRectifier,
@@ -37,6 +42,7 @@ import type {
   SiteItemStatus,
   Store,
   User,
+  ExportJob,
   WorkflowAction
 } from "./types.js";
 
@@ -382,6 +388,7 @@ export function buildRouter(store: Store, config: ApiConfig): Router {
   registerWorkflowRoutes(router, store, config);
   registerPhotoRoutes(router, store, config, storage);
   registerNotificationRoutes(router, store, config);
+  registerExportRoutes(router, store, config, storage);
 
   router.add("GET", "/audit/logs", (request) => {
     authenticate(request, store, config);
@@ -395,6 +402,131 @@ export function buildRouter(store: Store, config: ApiConfig): Router {
   });
 
   return router;
+}
+
+function registerExportRoutes(router: Router, store: Store, config: ApiConfig, storage: ObjectStorageClient): void {
+  router.add("POST", "/exports/site-items", (request) => {
+    authenticate(request, store, config);
+    const { user } = requireContext(request);
+    if (!canCreateSiteItemLedgerExport(user)) throw forbidden();
+    const filters = parseSiteItemExportFilters(request.body ? assertRecord(request.body) : {});
+    const now = new Date();
+    const job: ExportJob = {
+      id: newId("export"),
+      type: "excel",
+      status: "running",
+      requestedBy: user.id,
+      params: filters,
+      createdAt: now.toISOString(),
+      startedAt: now.toISOString()
+    };
+    store.exportJobs.unshift(job);
+
+    try {
+      const items = filterItemsForExport(visibleItems(user, store), filters, now);
+      const artifact = buildSiteItemLedgerExport({
+        requester: user,
+        items,
+        photos: store.photos,
+        workflowLogs: store.workflowLogs,
+        sections: store.sections,
+        areas: store.areas,
+        disciplines: store.disciplines,
+        organizations: store.organizations,
+        users: store.users,
+        generatedAt: now
+      });
+      Object.assign(job, {
+        status: "succeeded",
+        artifactKey: artifact.artifactKey,
+        artifactFileName: artifact.fileName,
+        artifactMimeType: artifact.mimeType,
+        completedAt: new Date().toISOString()
+      });
+      writeAudit(store, user.id, "export_site_items", "ExportJob", job.id);
+    } catch (error) {
+      Object.assign(job, {
+        status: "failed",
+        errorMessage: error instanceof Error ? error.message : "Export failed",
+        completedAt: new Date().toISOString()
+      });
+    }
+
+    return job;
+  });
+
+  router.add("GET", "/exports/:id", (request) => {
+    authenticate(request, store, config);
+    const { user } = requireContext(request);
+    const job = mustFindAuthorizedExportJob(store, user, request.params.id);
+    return job;
+  });
+
+  router.add("GET", "/exports/:id/download", (request) => {
+    authenticate(request, store, config);
+    const { user } = requireContext(request);
+    const job = mustFindAuthorizedExportJob(store, user, request.params.id);
+    if (job.status !== "succeeded" || !job.artifactKey || !job.artifactFileName || !job.artifactMimeType) {
+      throw notFound("Export artifact not found");
+    }
+    const artifact = readGeneratedExportArtifact(job.artifactKey);
+    if (artifact) {
+      return {
+        fileName: artifact.fileName,
+        mimeType: artifact.mimeType,
+        contentBase64: Buffer.from(artifact.content).toString("base64")
+      };
+    }
+    return {
+      fileName: job.artifactFileName,
+      mimeType: job.artifactMimeType,
+      ...storage.createDownloadTarget(job.artifactKey)
+    };
+  });
+}
+
+function mustFindAuthorizedExportJob(store: Store, user: User, jobId: string): ExportJob {
+  const job = mustFind(store.exportJobs, jobId, "ExportJob");
+  if (user.role !== "admin" && job.requestedBy !== user.id) throw notFound("Export job not found");
+  return job;
+}
+
+function parseSiteItemExportFilters(body: Record<string, unknown>) {
+  return pickDefined({
+    search: optionalString(body.search),
+    status: readOptionalEnum(body.status, siteItemStatuses, "status"),
+    type: readOptionalEnum(body.type, siteItemTypes, "type"),
+    severity: readOptionalEnum(body.severity, severities, "severity"),
+    sectionId: optionalString(body.sectionId),
+    areaId: optionalString(body.areaId),
+    disciplineId: optionalString(body.disciplineId),
+    organizationId: optionalString(body.organizationId),
+    overdue: typeof body.overdue === "boolean" ? body.overdue : undefined
+  });
+}
+
+const siteItemStatuses = ["pending_approval", "dispatched", "rectifying", "pending_acceptance", "closed", "voided"] as const;
+const siteItemTypes = ["defect", "punch"] as const;
+const severities = ["normal", "important", "severe"] as const;
+
+function readOptionalEnum<T extends string>(value: unknown, allowed: readonly T[], name: string): T | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string" || !allowed.includes(value as T)) throw badRequest(`${name} is invalid`);
+  return value as T;
+}
+
+function filterItemsForExport(items: SiteItem[], filters: ReturnType<typeof parseSiteItemExportFilters>, now: Date): SiteItem[] {
+  const search = filters.search?.toLowerCase();
+  return items
+    .filter((item) => !filters.status || item.status === filters.status)
+    .filter((item) => !filters.type || item.type === filters.type)
+    .filter((item) => !filters.severity || item.severity === filters.severity)
+    .filter((item) => !filters.sectionId || item.sectionId === filters.sectionId)
+    .filter((item) => !filters.areaId || item.areaId === filters.areaId)
+    .filter((item) => !filters.disciplineId || item.disciplineId === filters.disciplineId)
+    .filter((item) => !filters.organizationId || item.responsibleOrgId === filters.organizationId)
+    .filter((item) => !filters.overdue || (new Date(item.dueAt).getTime() < now.getTime() && item.status !== "closed" && item.status !== "voided"))
+    .filter((item) => !search || `${item.itemNo} ${item.title} ${item.description}`.toLowerCase().includes(search));
 }
 
 function registerMasterData<T extends MutableMaster>(router: Router, store: Store, config: ApiConfig, name: string, collection: T[]): void {

@@ -38,6 +38,13 @@ export class ObjectStorageClient {
     };
   }
 
+  createDownloadTarget(objectKey: string): { downloadUrl: string; expiresInSeconds: number } {
+    return {
+      downloadUrl: this.objectUrl(objectKey, "download=1"),
+      expiresInSeconds: 900
+    };
+  }
+
   private objectUrl(objectKey: string, query: string): string {
     const endpoint = this.config.objectStorageEndpoint.replace(/\/$/, "");
     return `${endpoint}/${this.config.objectStorageBucket}/${objectKey}?${query}`;

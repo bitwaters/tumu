@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import type { ApiConfig } from "./config.js";
-import { badRequest, forbidden, unauthorized } from "./errors.js";
+import { badRequest, forbidden, notFound, unauthorized } from "./errors.js";
 import { assertRecord, readString, readStringArray, Router } from "./http.js";
 import { verifyToken } from "./security.js";
 import { ObjectStorageClient } from "./storage.js";
@@ -12,6 +12,7 @@ import { MasterDataRepository } from "./repositories/master-data/index.js";
 import { NotificationsRepository } from "./repositories/notifications/index.js";
 import { PhotosRepository } from "./repositories/photos/index.js";
 import { SiteItemsRepository } from "./repositories/site-items/index.js";
+import { ExportJobsRepository } from "./repositories/export-jobs/index.js";
 import { UsersRepository } from "./repositories/users/index.js";
 import { AuditService } from "./services/audit/index.js";
 import { AuthService } from "./services/auth/index.js";
@@ -22,7 +23,12 @@ import { NotificationsService } from "./services/notifications/index.js";
 import { PhotosService } from "./services/photos/index.js";
 import { SiteItemsService } from "./services/site-items/index.js";
 import { UsersService } from "./services/users/index.js";
-import type { Role, Severity, SiteItemStatus, SiteItemType, User, WorkflowAction } from "./types.js";
+import {
+  buildSiteItemLedgerExport,
+  canCreateSiteItemLedgerExport,
+  readGeneratedExportArtifact
+} from "./services/import-export/index.js";
+import type { ExportJob, Role, Severity, SiteItem, SiteItemStatus, SiteItemType, User, WorkflowAction } from "./types.js";
 
 export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Router {
   const router = new Router();
@@ -33,13 +39,15 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
   const authRepository = new AuthRepository(context);
   const idempotencyRepository = new IdempotencyRepository(context);
   const notificationsRepository = new NotificationsRepository(context);
+  const siteItemsRepository = new SiteItemsRepository(context);
+  const exportJobsRepository = new ExportJobsRepository(context);
 
   const authService = new AuthService(authRepository, config, auditRepository);
   const idempotencyService = new IdempotencyService(idempotencyRepository, config);
   const usersService = new UsersService(new UsersRepository(context), auditRepository, idempotencyService);
   const masterDataService = new MasterDataService(new MasterDataRepository(context), auditRepository);
   const drawingsService = new DrawingsService(new DrawingsRepository(context), auditRepository);
-  const siteItemsService = new SiteItemsService(new SiteItemsRepository(context), auditRepository, idempotencyService, notificationsRepository);
+  const siteItemsService = new SiteItemsService(siteItemsRepository, auditRepository, idempotencyService, notificationsRepository);
   const photosService = new PhotosService(new PhotosRepository(context), storage, config, idempotencyService, auditRepository);
   const notificationsService = new NotificationsService(notificationsRepository);
   const auditService = new AuditService(auditRepository);
@@ -207,6 +215,84 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
     })
   );
 
+  router.add("POST", "/exports/site-items", async (request) => {
+    const actor = await viewer(request);
+    if (!canCreateSiteItemLedgerExport(actor)) throw forbidden();
+    const filters = parseSiteItemExportFilters(request.body ? assertRecord(request.body) : {});
+    const now = new Date();
+    let job = await exportJobsRepository.create({
+      type: "excel",
+      status: "running",
+      requestedBy: actor.id,
+      params: filters,
+      startedAt: now
+    });
+
+    try {
+      const items = await siteItemsService.list(actor, filters);
+      const details = await Promise.all(items.map((item) => siteItemsRepository.findDetailById(actor, item.id)));
+      const artifact = buildSiteItemLedgerExport({
+        requester: actor,
+        items,
+        photos: details.flatMap((detail) => detail?.photos ?? []),
+        workflowLogs: details.flatMap((detail) => detail?.workflowLogs ?? []),
+        sections: await masterDataService.list("sections", actor, true),
+        areas: await masterDataService.list("areas", actor, true),
+        disciplines: await masterDataService.list("disciplines", actor, true),
+        organizations: await masterDataService.list("organizations", actor, true),
+        users: await usersService.listVisible(actor, {}),
+        generatedAt: now
+      });
+      job = (await exportJobsRepository.update(job.id, {
+        status: "succeeded",
+        artifactKey: artifact.artifactKey,
+        artifactFileName: artifact.fileName,
+        artifactMimeType: artifact.mimeType,
+        completedAt: new Date()
+      })) as ExportJob;
+      await auditRepository.create({
+        actorId: actor.id,
+        action: "export_site_items",
+        resourceType: "ExportJob",
+        resourceId: job.id
+      });
+    } catch (error) {
+      job = (await exportJobsRepository.update(job.id, {
+        status: "failed",
+        errorMessage: error instanceof Error ? error.message : "Export failed",
+        completedAt: new Date()
+      })) as ExportJob;
+    }
+
+    return job;
+  });
+
+  router.add("GET", "/exports/:id", async (request) => {
+    const actor = await viewer(request);
+    return mustFindAuthorizedExportJob(await exportJobsRepository.findById(request.params.id), actor);
+  });
+
+  router.add("GET", "/exports/:id/download", async (request) => {
+    const actor = await viewer(request);
+    const job = mustFindAuthorizedExportJob(await exportJobsRepository.findById(request.params.id), actor);
+    if (job.status !== "succeeded" || !job.artifactKey || !job.artifactFileName || !job.artifactMimeType) {
+      throw badRequest("Export artifact is not ready");
+    }
+    const artifact = readGeneratedExportArtifact(job.artifactKey);
+    if (artifact) {
+      return {
+        fileName: artifact.fileName,
+        mimeType: artifact.mimeType,
+        contentBase64: Buffer.from(artifact.content).toString("base64")
+      };
+    }
+    return {
+      fileName: job.artifactFileName,
+      mimeType: job.artifactMimeType,
+      ...storage.createDownloadTarget(job.artifactKey)
+    };
+  });
+
   return router;
 }
 
@@ -249,6 +335,45 @@ function idempotencyRequest(request: Parameters<Router["add"]>[2] extends (reque
     path: request.path,
     key: Array.isArray(header) ? header[0] : header
   };
+}
+
+function mustFindAuthorizedExportJob(job: ExportJob | undefined, actor: User): ExportJob {
+  if (!job || (actor.role !== "admin" && job.requestedBy !== actor.id)) throw notFound("Export job not found");
+  return job;
+}
+
+function parseSiteItemExportFilters(body: Record<string, unknown>) {
+  return pickDefined({
+    search: typeof body.search === "string" && body.search.trim() ? body.search.trim() : undefined,
+    status: readOptionalEnum(body.status, siteItemStatuses, "status"),
+    type: readOptionalEnum(body.type, siteItemTypes, "type"),
+    severity: readOptionalEnum(body.severity, severities, "severity"),
+    sectionId: typeof body.sectionId === "string" && body.sectionId.trim() ? body.sectionId.trim() : undefined,
+    areaId: typeof body.areaId === "string" && body.areaId.trim() ? body.areaId.trim() : undefined,
+    disciplineId: typeof body.disciplineId === "string" && body.disciplineId.trim() ? body.disciplineId.trim() : undefined,
+    organizationId: typeof body.organizationId === "string" && body.organizationId.trim() ? body.organizationId.trim() : undefined,
+    overdue: typeof body.overdue === "boolean" ? body.overdue : undefined
+  }) as {
+    search?: string;
+    status?: SiteItemStatus;
+    type?: SiteItem["type"];
+    severity?: SiteItem["severity"];
+    sectionId?: string;
+    areaId?: string;
+    disciplineId?: string;
+    organizationId?: string;
+    overdue?: boolean;
+  };
+}
+
+const siteItemStatuses = ["pending_approval", "dispatched", "rectifying", "pending_acceptance", "closed", "voided"] as const;
+const siteItemTypes = ["defect", "punch"] as const;
+const severities = ["normal", "important", "severe"] as const;
+
+function readOptionalEnum<T extends string>(value: unknown, allowed: readonly T[], name: string): T | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string" || !allowed.includes(value as T)) throw badRequest(`${name} is invalid`);
+  return value as T;
 }
 
 function queryString(request: Parameters<Router["add"]>[2] extends (request: infer R) => unknown ? R : never, key: string): string | undefined {
