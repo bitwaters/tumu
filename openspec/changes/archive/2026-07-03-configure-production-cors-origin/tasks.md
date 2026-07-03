@@ -13,4 +13,4 @@
 
 - [x] 3.1 Add tests for configured CORS header behavior and generated production env values.
 - [x] 3.2 Run targeted tests, production env validation, builds/typechecks, and OpenSpec validation.
-- [ ] 3.3 Archive the OpenSpec change after all tasks complete.
+- [x] 3.3 Archive the OpenSpec change after all tasks complete.

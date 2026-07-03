@@ -15,7 +15,7 @@ The system SHALL provide a production Docker Compose runtime that starts Web, AP
 - **THEN** API, Web, PostgreSQL, Redis, and object storage containers report healthy or running states according to the documented checks
 
 ### Requirement: Production Environment Template
-The system SHALL provide a production environment template and a production environment bootstrap command that list or generate required deployment values, secrets, hostnames, ports, database settings, object storage settings, JWT secret, upload limits, smoke account values, and backup directory configuration without committing real secrets.
+The system SHALL provide a production environment template and a production environment bootstrap command that list or generate required deployment values, secrets, hostnames, ports, database settings, object storage settings, JWT secret, CORS origin, upload limits, smoke account values, and backup directory configuration without committing real secrets.
 
 #### Scenario: Missing required environment value
 - **WHEN** the production preflight script runs with a missing required value
@@ -32,6 +32,10 @@ The system SHALL provide a production environment template and a production envi
 #### Scenario: Existing production environment is protected
 - **WHEN** `.env.production` already exists and the operator runs the bootstrap command without a force option
 - **THEN** the command refuses to overwrite the existing file
+
+#### Scenario: Production CORS origin generated
+- **WHEN** an operator generates `.env.production` for a production Web URL
+- **THEN** the environment file includes an API CORS origin matching the browser-visible Web URL
 
 ### Requirement: Deployment Validation Script
 The system SHALL provide a deployment validation script that checks required tools, environment values, Compose configuration, built artifacts, API health, Web health, and a minimal authenticated API smoke path.
