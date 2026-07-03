@@ -16,12 +16,12 @@
 
 ## 3. Import Backend
 
-- [ ] 3.1 Implement import file upload or text payload handling for supported master-data kinds.
-- [ ] 3.2 Implement row validation for organizations, sections, areas, disciplines, and users.
-- [ ] 3.3 Implement idempotent import job creation with accepted/rejected row counts.
-- [ ] 3.4 Write audit records for applied import rows.
-- [ ] 3.5 Add import job status endpoint with row-level errors and no password hash exposure.
-- [ ] 3.6 Add API tests for admin-only access, validation errors, idempotent retries, and partial accepted rows.
+- [x] 3.1 Implement import file upload or text payload handling for supported master-data kinds.
+- [x] 3.2 Implement row validation for organizations, sections, areas, disciplines, and users.
+- [x] 3.3 Implement idempotent import job creation with accepted/rejected row counts.
+- [x] 3.4 Write audit records for applied import rows.
+- [x] 3.5 Add import job status endpoint with row-level errors and no password hash exposure.
+- [x] 3.6 Add API tests for admin-only access, validation errors, idempotent retries, and partial accepted rows.
 
 ## 4. Frontend Integration
 

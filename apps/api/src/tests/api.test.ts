@@ -358,6 +358,76 @@ test("photo package, closeout PDF and audit exports create downloadable artifact
   await rejects(() => request("POST", "/exports/audit", {}, supervisorToken));
 });
 
+test("master data imports validate rows, apply accepted rows and replay idempotent requests", async () => {
+  const { store, request } = createHarness();
+  const adminToken = await login(request, "admin", "admin123");
+  const supervisorToken = await login(request, "wang.supervisor");
+  const initialSections = store.sections.length;
+
+  await rejects(() =>
+    request(
+      "POST",
+      "/imports/sections",
+      { sourceFileName: "sections.csv", csvText: "name,code\n非法标段,NOPE" },
+      supervisorToken
+    )
+  );
+
+  const csvText = "name,code,isActive\n调试标段,DBG,true\n重复标段,CIV-A,true";
+  const job = (await request("POST", "/imports/sections", { sourceFileName: "sections.csv", csvText }, adminToken, "import-sections-1")) as {
+    id: string;
+    status: string;
+    acceptedRows: number;
+    rejectedRows: number;
+    errors: Array<{ rowNumber: number; field?: string; message: string }>;
+  };
+  equal(job.status, "succeeded");
+  equal(job.acceptedRows, 1);
+  equal(job.rejectedRows, 1);
+  equal(job.errors[0]?.rowNumber, 3);
+  equal(store.sections.length, initialSections + 1);
+
+  const replay = (await request("POST", "/imports/sections", { sourceFileName: "sections.csv", csvText }, adminToken, "import-sections-1")) as {
+    id: string;
+  };
+  equal(replay.id, job.id);
+  equal(store.sections.length, initialSections + 1);
+
+  const status = (await request("GET", `/imports/${job.id}`, undefined, adminToken)) as { id: string; errors: unknown[]; passwordHash?: string };
+  equal(status.id, job.id);
+  ok(Array.isArray(status.errors));
+  equal(status.passwordHash, undefined);
+  ok(store.auditLogs.some((log) => log.action === "import_create" && log.resourceType === "Section"));
+});
+
+test("user imports validate references and never expose password hashes in job output", async () => {
+  const { store, request } = createHarness();
+  const adminToken = await login(request, "admin", "admin123");
+  const csvText = [
+    "organizationId,name,phone,username,role,password,sectionScopeIds,isActive",
+    "org-civil,导入整改人,13800006666,import.fix,rectifier,secret123,sec-civil-a,true",
+    "org-owner,错误整改人,phone-bad,bad.fix,rectifier,secret123,sec-civil-a,true"
+  ].join("\n");
+
+  const job = (await request("POST", "/imports/users", { sourceFileName: "users.csv", csvText }, adminToken, "import-users-1")) as {
+    acceptedRows: number;
+    rejectedRows: number;
+    errors: Array<{ field?: string; message: string }>;
+    passwordHash?: string;
+  };
+
+  equal(job.acceptedRows, 1);
+  equal(job.rejectedRows, 1);
+  equal(job.passwordHash, undefined);
+  ok(job.errors.some((error) => error.field === "phone"));
+  ok(job.errors.some((error) => error.field === "organizationId"));
+  const imported = store.users.find((user) => user.username === "import.fix");
+  ok(imported?.passwordHash.startsWith("scrypt$"));
+  ok(imported?.passwordHash !== "secret123");
+  const loginResult = (await request("POST", "/auth/login", { username: "import.fix", password: "secret123" })) as { accessToken: string };
+  ok(loginResult.accessToken);
+});
+
 async function rejects(fn: () => Promise<unknown>): Promise<void> {
   let rejected = false;
   try {

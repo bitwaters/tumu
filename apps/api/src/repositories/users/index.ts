@@ -25,6 +25,7 @@ export interface CreateUserInput {
   role: Role;
   passwordHash: string;
   sectionScopeIds: string[];
+  isActive?: boolean;
 }
 
 export interface UpdateUserInput {
@@ -131,6 +132,7 @@ export class UsersRepository {
         username: input.username,
         role: input.role,
         passwordHash: input.passwordHash,
+        isActive: input.isActive ?? true,
         sectionScopes: {
           create: input.sectionScopeIds.map((sectionId) => ({ sectionId }))
         }

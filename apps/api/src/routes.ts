@@ -21,7 +21,9 @@ import {
   buildPhotoPackageExport,
   buildSiteItemLedgerExport,
   canCreateSiteItemLedgerExport,
+  validateImportCsv,
   type GeneratedExportArtifact,
+  type NormalizedImportRow,
   readGeneratedExportArtifact
 } from "./services/import-export/index.js";
 import {
@@ -47,6 +49,8 @@ import type {
   Store,
   User,
   ExportJob,
+  ImportJob,
+  ImportKind,
   WorkflowAction
 } from "./types.js";
 
@@ -393,6 +397,7 @@ export function buildRouter(store: Store, config: ApiConfig): Router {
   registerPhotoRoutes(router, store, config, storage);
   registerNotificationRoutes(router, store, config);
   registerExportRoutes(router, store, config, storage);
+  registerImportRoutes(router, store, config);
 
   router.add("GET", "/audit/logs", (request) => {
     authenticate(request, store, config);
@@ -406,6 +411,116 @@ export function buildRouter(store: Store, config: ApiConfig): Router {
   });
 
   return router;
+}
+
+function registerImportRoutes(router: Router, store: Store, config: ApiConfig): void {
+  router.add("POST", "/imports/:kind", async (request) => {
+    authenticate(request, store, config);
+    const { user } = requireContext(request);
+    mapForbidden(() => requireAdmin(user));
+    const kind = readImportKind(request.params.kind);
+    const body = assertRecord(request.body);
+    const csvText = readString(body, "csvText") ?? "";
+    const sourceFileName = readString(body, "sourceFileName", false);
+    return withIdempotency(store, config, request, user.id, () => ({
+      body: runMemoryImportJob(store, user, kind, csvText, sourceFileName)
+    }));
+  });
+
+  router.add("GET", "/imports/:id", (request) => {
+    authenticate(request, store, config);
+    const { user } = requireContext(request);
+    mapForbidden(() => requireAdmin(user));
+    return mustFind(store.importJobs, request.params.id, "ImportJob");
+  });
+}
+
+function runMemoryImportJob(store: Store, user: User, kind: ImportKind, csvText: string, sourceFileName?: string): ImportJob {
+  const now = new Date().toISOString();
+  const job: ImportJob = {
+    id: newId("import"),
+    kind,
+    status: "running",
+    requestedBy: user.id,
+    sourceFileName,
+    acceptedRows: 0,
+    rejectedRows: 0,
+    errors: [],
+    createdAt: now,
+    startedAt: now
+  };
+  store.importJobs.unshift(job);
+
+  try {
+    const result = validateImportCsv(kind, csvText, {
+      organizations: store.organizations,
+      sections: store.sections,
+      areas: store.areas,
+      disciplines: store.disciplines,
+      users: store.users
+    });
+    for (const row of result.accepted) applyMemoryImportRow(store, user, row);
+    Object.assign(job, {
+      status: "succeeded",
+      acceptedRows: result.accepted.length,
+      rejectedRows: result.rejectedRows,
+      errors: result.errors,
+      completedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    Object.assign(job, {
+      status: "failed",
+      errorMessage: error instanceof Error ? error.message : "Import failed",
+      completedAt: new Date().toISOString()
+    });
+  }
+
+  return job;
+}
+
+function applyMemoryImportRow(store: Store, user: User, row: NormalizedImportRow): void {
+  if (row.kind === "organizations") {
+    const record: Organization = { id: newId("org"), projectId: store.project.id, ...row.data };
+    store.organizations.push(record);
+    writeAudit(store, user.id, "import_create", "Organization", record.id, { rowNumber: row.rowNumber });
+    return;
+  }
+  if (row.kind === "sections") {
+    const record: Section = { id: newId("section"), projectId: store.project.id, ...row.data };
+    store.sections.push(record);
+    writeAudit(store, user.id, "import_create", "Section", record.id, { rowNumber: row.rowNumber });
+    return;
+  }
+  if (row.kind === "areas") {
+    const record: Area = { id: newId("area"), projectId: store.project.id, ...row.data };
+    store.areas.push(record);
+    writeAudit(store, user.id, "import_create", "Area", record.id, { rowNumber: row.rowNumber });
+    return;
+  }
+  if (row.kind === "disciplines") {
+    const record: Discipline = { id: newId("discipline"), projectId: store.project.id, ...row.data };
+    store.disciplines.push(record);
+    writeAudit(store, user.id, "import_create", "Discipline", record.id, { rowNumber: row.rowNumber });
+    return;
+  }
+  const record: User = {
+    id: newId("user"),
+    organizationId: row.data.organizationId,
+    name: row.data.name,
+    phone: row.data.phone,
+    username: row.data.username,
+    role: row.data.role,
+    isActive: row.data.isActive,
+    sectionScopeIds: row.data.sectionScopeIds,
+    passwordHash: hashPassword(row.data.password)
+  };
+  store.users.push(record);
+  writeAudit(store, user.id, "import_create", "User", record.id, { rowNumber: row.rowNumber });
+}
+
+function readImportKind(value: string): ImportKind {
+  if (["organizations", "sections", "areas", "disciplines", "users"].includes(value)) return value as ImportKind;
+  throw badRequest("import kind is invalid");
 }
 
 function registerExportRoutes(router: Router, store: Store, config: ApiConfig, storage: ObjectStorageClient): void {

@@ -12,12 +12,14 @@ export interface CreateSectionInput {
   projectId: string;
   name: string;
   code: string;
+  isActive?: boolean;
 }
 
 export interface CreateOrganizationInput {
   projectId: string;
   name: string;
   type: OrganizationType;
+  isActive?: boolean;
 }
 
 export interface CreateAreaInput extends CreateSectionInput {
@@ -99,17 +101,18 @@ export class MasterDataRepository {
   }
 
   async createSection(input: CreateSectionInput): Promise<Section> {
-    return this.context.prisma.section.create({ data: input });
+    return this.context.prisma.section.create({ data: { ...input, isActive: input.isActive ?? true } });
   }
 
   async createOrganization(input: CreateOrganizationInput): Promise<Organization> {
-    return this.context.prisma.organization.create({ data: input });
+    return this.context.prisma.organization.create({ data: { ...input, isActive: input.isActive ?? true } });
   }
 
   async createArea(input: CreateAreaInput): Promise<Area> {
     const record = await this.context.prisma.area.create({
       data: {
         ...input,
+        isActive: input.isActive ?? true,
         parentId: input.parentId ?? null
       }
     });
@@ -117,7 +120,7 @@ export class MasterDataRepository {
   }
 
   async createDiscipline(input: CreateDisciplineInput): Promise<Discipline> {
-    return this.context.prisma.discipline.create({ data: input });
+    return this.context.prisma.discipline.create({ data: { ...input, isActive: input.isActive ?? true } });
   }
 
   async updateSection(id: string, input: UpdateMasterDataInput): Promise<Section | undefined> {

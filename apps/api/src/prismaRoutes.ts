@@ -13,6 +13,7 @@ import { NotificationsRepository } from "./repositories/notifications/index.js";
 import { PhotosRepository } from "./repositories/photos/index.js";
 import { SiteItemsRepository } from "./repositories/site-items/index.js";
 import { ExportJobsRepository } from "./repositories/export-jobs/index.js";
+import { ImportJobsRepository } from "./repositories/import-jobs/index.js";
 import { UsersRepository } from "./repositories/users/index.js";
 import { AuditService } from "./services/audit/index.js";
 import { AuthService } from "./services/auth/index.js";
@@ -29,10 +30,13 @@ import {
   buildPhotoPackageExport,
   buildSiteItemLedgerExport,
   canCreateSiteItemLedgerExport,
+  validateImportCsv,
   type GeneratedExportArtifact,
+  type NormalizedImportRow,
   readGeneratedExportArtifact
 } from "./services/import-export/index.js";
-import type { ExportJob, Role, Severity, SiteItem, SiteItemStatus, SiteItemType, User, WorkflowAction } from "./types.js";
+import type { ExportJob, ImportJob, ImportKind, Role, Severity, SiteItem, SiteItemStatus, SiteItemType, User, WorkflowAction } from "./types.js";
+import { hashPassword } from "./security.js";
 
 export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Router {
   const router = new Router();
@@ -45,11 +49,14 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
   const notificationsRepository = new NotificationsRepository(context);
   const siteItemsRepository = new SiteItemsRepository(context);
   const exportJobsRepository = new ExportJobsRepository(context);
+  const importJobsRepository = new ImportJobsRepository(context);
+  const masterDataRepository = new MasterDataRepository(context);
+  const usersRepository = new UsersRepository(context);
 
   const authService = new AuthService(authRepository, config, auditRepository);
   const idempotencyService = new IdempotencyService(idempotencyRepository, config);
-  const usersService = new UsersService(new UsersRepository(context), auditRepository, idempotencyService);
-  const masterDataService = new MasterDataService(new MasterDataRepository(context), auditRepository);
+  const usersService = new UsersService(usersRepository, auditRepository, idempotencyService);
+  const masterDataService = new MasterDataService(masterDataRepository, auditRepository);
   const drawingsService = new DrawingsService(new DrawingsRepository(context), auditRepository);
   const siteItemsService = new SiteItemsService(siteItemsRepository, auditRepository, idempotencyService, notificationsRepository);
   const photosService = new PhotosService(new PhotosRepository(context), storage, config, idempotencyService, auditRepository);
@@ -219,6 +226,46 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
     })
   );
 
+  router.add("POST", "/imports/:kind", async (request) => {
+    const actor = await viewer(request);
+    if (actor.role !== "admin") throw forbidden();
+    const kind = readImportKind(request.params.kind);
+    const body = assertRecord(request.body);
+    const csvText = readString(body, "csvText") ?? "";
+    const sourceFileName = readString(body, "sourceFileName", false);
+    return idempotencyService.run(
+      {
+        actorId: actor.id,
+        method: request.method,
+        path: request.path,
+        key: idempotencyRequest(request).key,
+        requestBody: { kind, csvText, sourceFileName }
+      },
+      async () => ({
+        body: await runPrismaImportJob({
+          importJobsRepository,
+          masterDataRepository,
+          usersRepository,
+          auditRepository,
+          masterDataService,
+          usersService,
+          actor,
+          kind,
+          csvText,
+          sourceFileName
+        })
+      })
+    );
+  });
+
+  router.add("GET", "/imports/:id", async (request) => {
+    const actor = await viewer(request);
+    if (actor.role !== "admin") throw forbidden();
+    const job = await importJobsRepository.findById(request.params.id);
+    if (!job) throw notFound("Import job not found");
+    return job;
+  });
+
   router.add("POST", "/exports/site-items", async (request) => {
     const actor = await viewer(request);
     if (!canCreateSiteItemLedgerExport(actor)) throw forbidden();
@@ -316,6 +363,95 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
   });
 
   return router;
+}
+
+interface RunPrismaImportJobInput {
+  importJobsRepository: ImportJobsRepository;
+  masterDataRepository: MasterDataRepository;
+  usersRepository: UsersRepository;
+  auditRepository: AuditRepository;
+  masterDataService: MasterDataService;
+  usersService: UsersService;
+  actor: User;
+  kind: ImportKind;
+  csvText: string;
+  sourceFileName?: string;
+}
+
+async function runPrismaImportJob(input: RunPrismaImportJobInput): Promise<ImportJob> {
+  let job = await input.importJobsRepository.create({
+    kind: input.kind,
+    status: "running",
+    requestedBy: input.actor.id,
+    sourceFileName: input.sourceFileName,
+    startedAt: new Date()
+  });
+
+  try {
+    const [organizations, sections, areas, disciplines, users] = await Promise.all([
+      input.masterDataService.list("organizations", input.actor, true),
+      input.masterDataService.list("sections", input.actor, true),
+      input.masterDataService.list("areas", input.actor, true),
+      input.masterDataService.list("disciplines", input.actor, true),
+      input.usersService.list()
+    ]);
+    const result = validateImportCsv(input.kind, input.csvText, { organizations, sections, areas, disciplines, users });
+    const projectId = await input.masterDataRepository.findDefaultProjectId();
+    if (!projectId) throw badRequest("project is not initialized");
+    for (const row of result.accepted) {
+      await applyPrismaImportRow(input, projectId, row);
+    }
+    job = (await input.importJobsRepository.update(job.id, {
+      status: "succeeded",
+      acceptedRows: result.accepted.length,
+      rejectedRows: result.rejectedRows,
+      errors: result.errors,
+      completedAt: new Date()
+    })) as ImportJob;
+  } catch (error) {
+    job = (await input.importJobsRepository.update(job.id, {
+      status: "failed",
+      errorMessage: error instanceof Error ? error.message : "Import failed",
+      completedAt: new Date()
+    })) as ImportJob;
+  }
+
+  return job;
+}
+
+async function applyPrismaImportRow(input: RunPrismaImportJobInput, projectId: string, row: NormalizedImportRow): Promise<void> {
+  if (row.kind === "organizations") {
+    const record = await input.masterDataRepository.createOrganization({ projectId, ...row.data });
+    await input.auditRepository.create({ actorId: input.actor.id, action: "import_create", resourceType: "Organization", resourceId: record.id, metadata: { rowNumber: row.rowNumber } });
+    return;
+  }
+  if (row.kind === "sections") {
+    const record = await input.masterDataRepository.createSection({ projectId, ...row.data });
+    await input.auditRepository.create({ actorId: input.actor.id, action: "import_create", resourceType: "Section", resourceId: record.id, metadata: { rowNumber: row.rowNumber } });
+    return;
+  }
+  if (row.kind === "areas") {
+    const record = await input.masterDataRepository.createArea({ projectId, ...row.data });
+    await input.auditRepository.create({ actorId: input.actor.id, action: "import_create", resourceType: "Area", resourceId: record.id, metadata: { rowNumber: row.rowNumber } });
+    return;
+  }
+  if (row.kind === "disciplines") {
+    const record = await input.masterDataRepository.createDiscipline({ projectId, ...row.data });
+    await input.auditRepository.create({ actorId: input.actor.id, action: "import_create", resourceType: "Discipline", resourceId: record.id, metadata: { rowNumber: row.rowNumber } });
+    return;
+  }
+  const record = await input.usersRepository.create({
+    projectId,
+    organizationId: row.data.organizationId,
+    name: row.data.name,
+    phone: row.data.phone,
+    username: row.data.username,
+    role: row.data.role,
+    passwordHash: hashPassword(row.data.password),
+    sectionScopeIds: row.data.sectionScopeIds,
+    isActive: row.data.isActive
+  });
+  await input.auditRepository.create({ actorId: input.actor.id, action: "import_create", resourceType: "User", resourceId: record.id, metadata: { rowNumber: row.rowNumber } });
 }
 
 async function runPrismaExportJob(
@@ -436,6 +572,11 @@ function parseAuditExportFilters(body: Record<string, unknown>) {
     resourceType: typeof body.resourceType === "string" && body.resourceType.trim() ? body.resourceType.trim() : undefined,
     action: typeof body.action === "string" && body.action.trim() ? body.action.trim() : undefined
   });
+}
+
+function readImportKind(value: string): ImportKind {
+  if (["organizations", "sections", "areas", "disciplines", "users"].includes(value)) return value as ImportKind;
+  throw badRequest("import kind is invalid");
 }
 
 const siteItemStatuses = ["pending_approval", "dispatched", "rectifying", "pending_acceptance", "closed", "voided"] as const;
