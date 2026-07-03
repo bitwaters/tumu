@@ -41,7 +41,7 @@ export class UsersApi {
     return this.client.patch<User>(`/users/${userId}/disable`, {});
   }
 
-  resetPassword(userId: string, password?: string): Promise<{ ok: true }> {
-    return this.client.post<{ ok: true }>(`/users/${userId}/reset-password`, password ? { password } : {});
+  resetPassword(userId: string, password: string): Promise<{ ok: true }> {
+    return this.client.post<{ ok: true }>(`/users/${userId}/reset-password`, { password });
   }
 }

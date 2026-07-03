@@ -60,10 +60,11 @@ export class UsersService {
           if (!projectId) throw badRequest("project is not initialized");
 
           await this.validateUserInput(repository, input);
+          const password = readRequiredPassword(input.password);
           const created = await repository.create({
             ...input,
             projectId,
-            passwordHash: hashPassword(input.password ?? "password123")
+            passwordHash: hashPassword(password)
           });
           await auditRepository.create({
             actorId: viewer.id,
@@ -115,12 +116,13 @@ export class UsersService {
     });
   }
 
-  async resetPassword(viewer: User, userId: string, password = "password123"): Promise<{ ok: true }> {
+  async resetPassword(viewer: User, userId: string, password?: string): Promise<{ ok: true }> {
     requireAdmin(viewer);
+    const nextPassword = readRequiredPassword(password);
     return this.repository.transaction(async (context) => {
       const repository = this.repository.withContext(context);
       const auditRepository = this.auditRepository.withContext(context);
-      const changed = await repository.resetPassword(userId, hashPassword(password));
+      const changed = await repository.resetPassword(userId, hashPassword(nextPassword));
       if (!changed) throw notFound("User not found");
       await auditRepository.create({
         actorId: viewer.id,
@@ -167,6 +169,12 @@ export class UsersService {
 
 function requireAdmin(user: User): void {
   if (user.role !== "admin") throw forbidden();
+}
+
+function readRequiredPassword(password: string | undefined): string {
+  const trimmed = password?.trim();
+  if (!trimmed) throw badRequest("password is required");
+  return trimmed;
 }
 
 function canViewerSeeUser(viewer: User, user: User): boolean {

@@ -122,7 +122,7 @@ function normalizeUser(row: CsvRow, rowNumber: number, references: ImportReferen
   const phone = requireText(row, "phone", rowNumber, errors, "phone", "手机号");
   const username = requireText(row, "username", rowNumber, errors, "username", "账号");
   const role = requireEnum(row, "role", roles, rowNumber, errors, "role", "角色");
-  const password = readText(row, "password", "密码") || "password123";
+  const password = requireText(row, "password", rowNumber, errors, "密码");
   const sectionScopeIds = splitList(readText(row, "sectionScopeIds", "标段权限"));
   const isActive = readActive(row, rowNumber, errors);
 
@@ -138,7 +138,7 @@ function normalizeUser(row: CsvRow, rowNumber: number, references: ImportReferen
   if (missingSection) errors.push({ rowNumber, field: "sectionScopeIds", message: `sectionScopeId ${missingSection} is invalid` });
   if (sectionScopeIds.length === 0) errors.push({ rowNumber, field: "sectionScopeIds", message: "sectionScopeIds is required" });
 
-  if (!organizationId || !name || !phone || !username || !role || isActive === undefined || errors.some((error) => error.rowNumber === rowNumber)) return undefined;
+  if (!organizationId || !name || !phone || !username || !role || !password || isActive === undefined || errors.some((error) => error.rowNumber === rowNumber)) return undefined;
   return { kind: "users", rowNumber, data: { organizationId, name, phone, username, role, password, sectionScopeIds, isActive } };
 }
 

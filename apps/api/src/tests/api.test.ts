@@ -97,6 +97,22 @@ test("admin can manage users, non-admin cannot", async () => {
       "/users",
       {
         organizationId: "org-civil",
+        name: "缺密码用户",
+        phone: "13800008887",
+        username: "missing.password",
+        role: "rectifier",
+        sectionScopeIds: ["sec-civil-a"]
+      },
+      adminToken
+    )
+  );
+  ok(!store.users.some((user) => user.username === "missing.password"));
+  await rejects(() =>
+    request(
+      "POST",
+      "/users",
+      {
+        organizationId: "org-civil",
         name: "重复账号",
         phone: "13800008888",
         username: "new.fix",
@@ -107,6 +123,10 @@ test("admin can manage users, non-admin cannot", async () => {
       adminToken
     )
   );
+  const rectifier = store.users.find((user) => user.id === "u-rectifier-civil")!;
+  const previousPasswordHash = rectifier.passwordHash;
+  await rejects(() => request("POST", "/users/u-rectifier-civil/reset-password", {}, adminToken));
+  equal(rectifier.passwordHash, previousPasswordHash);
   await rejects(() => request("PATCH", "/users/u-rectifier-civil", { phone: "13800000003" }, adminToken));
   equal(store.users.find((user) => user.id === "u-rectifier-civil")?.phone, "13800000004");
 });
@@ -429,7 +449,8 @@ test("user imports validate references and never expose password hashes in job o
   const csvText = [
     "organizationId,name,phone,username,role,password,sectionScopeIds,isActive",
     "org-civil,导入整改人,13800006666,import.fix,rectifier,secret123,sec-civil-a,true",
-    "org-owner,错误整改人,phone-bad,bad.fix,rectifier,secret123,sec-civil-a,true"
+    "org-owner,错误整改人,phone-bad,bad.fix,rectifier,secret123,sec-civil-a,true",
+    "org-civil,缺密码整改人,13800006667,missing.import.password,rectifier,,sec-civil-a,true"
   ].join("\n");
 
   const job = (await request("POST", "/imports/users", { sourceFileName: "users.csv", csvText }, adminToken, "import-users-1")) as {
@@ -440,10 +461,12 @@ test("user imports validate references and never expose password hashes in job o
   };
 
   equal(job.acceptedRows, 1);
-  equal(job.rejectedRows, 1);
+  equal(job.rejectedRows, 2);
   equal(job.passwordHash, undefined);
   ok(job.errors.some((error) => error.field === "phone"));
   ok(job.errors.some((error) => error.field === "organizationId"));
+  ok(job.errors.some((error) => error.field === "password"));
+  ok(!store.users.some((user) => user.username === "missing.import.password"));
   const imported = store.users.find((user) => user.username === "import.fix");
   ok(imported?.passwordHash.startsWith("scrypt$"));
   ok(imported?.passwordHash !== "secret123");

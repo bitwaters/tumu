@@ -146,6 +146,7 @@ export function buildRouter(store: Store, config: ApiConfig): Router {
     mapForbidden(() => requireAdmin(user));
     return withIdempotency(store, config, request, user.id, () => {
       const body = assertRecord(request.body);
+      const password = readString(body, "password") as string;
       const created: User = {
         id: newId("user"),
         organizationId: readString(body, "organizationId") ?? "",
@@ -155,7 +156,7 @@ export function buildRouter(store: Store, config: ApiConfig): Router {
         role: (readString(body, "role") as User["role"]) ?? "rectifier",
         isActive: true,
         sectionScopeIds: readStringArray(body, "sectionScopeIds"),
-        passwordHash: hashPassword(readString(body, "password") ?? "password123")
+        passwordHash: hashPassword(password)
       };
       validateUser(store, created);
       store.users.push(created);
@@ -202,7 +203,7 @@ export function buildRouter(store: Store, config: ApiConfig): Router {
     mapForbidden(() => requireAdmin(user));
     const target = mustFind(store.users, request.params.id, "User");
     const body = assertRecord(request.body);
-    target.passwordHash = hashPassword(readString(body, "password") ?? "password123");
+    target.passwordHash = hashPassword(readString(body, "password") as string);
     writeAudit(store, user.id, "reset_password", "User", target.id);
     return { ok: true };
   });

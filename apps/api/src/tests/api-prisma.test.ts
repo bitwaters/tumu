@@ -89,6 +89,24 @@ if (!databaseUrl) {
           "/users",
           {
             organizationId: "org-civil",
+            name: "Prisma 缺密码整改人",
+            phone: "13800007776",
+            username: "prisma.missing.password",
+            role: "rectifier",
+            sectionScopeIds: ["sec-civil-a"]
+          },
+          adminToken
+        ),
+      400
+    );
+    await rejectsWithStatus(() => request("POST", `/users/${createdUser.id}/reset-password`, {}, adminToken), 400);
+    await rejectsWithStatus(
+      () =>
+        request(
+          "POST",
+          "/users",
+          {
+            organizationId: "org-civil",
             name: "Prisma 幂等冲突整改人",
             phone: "13800007779",
             username: "prisma.fix.conflict",

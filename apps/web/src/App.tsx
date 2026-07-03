@@ -710,7 +710,7 @@ function useAppState() {
     return updateUser(record, { isActive: false });
   }
 
-  async function resetUserPassword(record: User, password?: string): Promise<boolean> {
+  async function resetUserPassword(record: User, password: string): Promise<boolean> {
     if (!currentUser || currentUser.role !== "admin") return false;
     if (!runtimeConfig.useMocks) {
       try {
@@ -1487,7 +1487,7 @@ function AuthLoadingPage({ config }: { config: FrontendRuntimeConfig }) {
 function LoginPage({ state }: { state: AppState }) {
   const [selected, setSelected] = useState(users[1].id);
   const [username, setUsername] = useState("wang.supervisor");
-  const [password, setPassword] = useState("password123");
+  const [password, setPassword] = useState("");
   const isMockMode = state.runtimeConfig.useMocks;
   return (
     <main className="login-page">
@@ -3394,7 +3394,15 @@ function UserForm({
       setValues((prev) => ({ ...prev, organizationId: organizationOptions[0].id }));
     }
   }, [organizationOptions, values.organizationId]);
-  const canSave = Boolean(values.organizationId && values.name?.trim() && values.phone?.trim() && values.username?.trim() && values.role && values.sectionScopeIds?.length);
+  const canSave = Boolean(
+    values.organizationId &&
+      values.name?.trim() &&
+      values.phone?.trim() &&
+      values.username?.trim() &&
+      values.role &&
+      values.sectionScopeIds?.length &&
+      (user || values.password?.trim())
+  );
   function toggleSection(sectionId: string) {
     const selected = new Set(values.sectionScopeIds || []);
     if (selected.has(sectionId)) selected.delete(sectionId);
@@ -3409,7 +3417,7 @@ function UserForm({
       phone: values.phone,
       username: values.username,
       role: values.role,
-      password: values.password || undefined,
+      password: user ? undefined : values.password?.trim(),
       isActive: values.isActive,
       sectionScopeIds: values.sectionScopeIds
     };
@@ -3449,7 +3457,7 @@ function UserForm({
         </Field>
         {!user ? (
           <Field label="初始密码">
-            <TextInput value={values.password || ""} onChange={(event) => setValues({ ...values, password: event.target.value })} placeholder="留空默认 password123" />
+            <TextInput value={values.password || ""} onChange={(event) => setValues({ ...values, password: event.target.value })} placeholder="请输入初始密码" />
           </Field>
         ) : null}
         <Field label="状态">
@@ -3481,8 +3489,10 @@ function UserForm({
 
 function PasswordResetForm({ state, user, onCancel, onSaved }: { state: AppState; user: User; onCancel: () => void; onSaved: () => void }) {
   const [password, setPassword] = useState("");
+  const canSave = Boolean(password.trim());
   async function save() {
-    const saved = await state.resetUserPassword(user, password || undefined);
+    if (!canSave) return;
+    const saved = await state.resetUserPassword(user, password.trim());
     if (saved) onSaved();
   }
   return (
@@ -3491,14 +3501,14 @@ function PasswordResetForm({ state, user, onCancel, onSaved }: { state: AppState
         <h3>重置密码</h3>
         <Button variant="ghost" onClick={onCancel}>取消</Button>
       </div>
-      <p className="muted">{user.name} · 留空将重置为 password123</p>
+      <p className="muted">{user.name} · 请输入新的临时密码</p>
       <Field label="新密码">
         <TextInput value={password} onChange={(event) => setPassword(event.target.value)} />
       </Field>
       {state.dataError ? <p className="error-text">{state.dataError}</p> : null}
       <div className="action-row">
         <Button variant="secondary" onClick={onCancel}>取消</Button>
-        <Button onClick={save}>确认重置</Button>
+        <Button disabled={!canSave} onClick={save}>确认重置</Button>
       </div>
     </div>
   );
