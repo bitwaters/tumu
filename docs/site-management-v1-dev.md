@@ -541,15 +541,34 @@ export/
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | id | uuid | 主键 |
-| type | enum | excel, photo_package, pdf |
+| type | enum | excel, photo_package, pdf, audit |
 | status | enum | queued, running, succeeded, failed |
 | params | json | 导出参数 |
-| resultKey | string | 结果文件 Key |
+| artifactKey | string | 结果文件 Key |
+| artifactFileName | string | 结果文件名 |
+| artifactMimeType | string | 结果 MIME 类型 |
+| errorMessage | text | 失败原因 |
 | requestedBy | uuid | 发起人 |
 | createdAt | datetime | 创建时间 |
-| finishedAt | datetime | 完成时间 |
+| completedAt | datetime | 完成时间 |
 
-### 12.14 AuditLog
+### 12.14 ImportJob
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| id | uuid | 主键 |
+| kind | enum | users, organizations, sections, areas, disciplines |
+| status | enum | queued, running, succeeded, failed |
+| sourceFileName | string | 来源文件名 |
+| acceptedRows | number | 通过行数 |
+| rejectedRows | number | 拒绝行数 |
+| errors | json | 行级错误，包含 rowNumber、field、message |
+| errorMessage | text | 失败原因 |
+| requestedBy | uuid | 发起人 |
+| createdAt | datetime | 创建时间 |
+| completedAt | datetime | 完成时间 |
+
+### 12.15 AuditLog
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -666,16 +685,16 @@ export/
 
 ### 13.10 Exports
 
-- `POST /exports/site-items/excel`：创建 Excel 台账导出任务。
-- `POST /exports/site-items/photo-package`：创建照片包导出任务。
+- `POST /exports/site-items`：创建 Excel 台账导出任务。
+- `POST /exports/photo-package`：创建照片包导出任务。
 - `POST /exports/site-items/:id/pdf`：创建单事项 PDF 导出任务。
+- `POST /exports/audit`：创建审计导出任务。
 - `GET /exports/:id`：查看导出任务状态。
 - `GET /exports/:id/download`：下载导出结果。
 
 ### 13.11 Audit
 
 - `GET /audit/logs`：审计日志查询。
-- `GET /audit/logs/export`：导出审计日志。
 
 ## 14. 页面设计
 

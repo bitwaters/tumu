@@ -12,6 +12,8 @@
 - `PhotoAttachment`：支持未绑定照片；绑定事项后必须保留绑定时的标段、区域、专业和责任单位快照。
 - `WorkflowLog`：状态动作必须记录 `action`、`fromStatus`、`toStatus`、`actorId`、`createdAt`。
 - `Notification`：站内通知必须包含接收人、关联事项、类型、已读状态和创建时间。
+- `ExportJob`：导出任务必须包含 `type`、`status`、`requestedBy`、`createdAt`、`completedAt`、`artifactFileName`、`artifactMimeType`、`errorMessage`。
+- `ImportJob`：导入任务必须包含 `kind`、`status`、`requestedBy`、`acceptedRows`、`rejectedRows`、`errors`，错误项需要有行号、字段和消息。
 
 ## 2. 状态与动作
 
@@ -56,6 +58,9 @@
 - 桌面端导航固定为：首页看板、事项管理、图纸管理、基础数据、用户与权限、导入导出、审计日志。
 - 状态颜色语义保持一致：蓝色进行中、绿色关闭、橙色待复验/临期、红色严重/超期、灰色作废。
 - 通知未读数需要支持移动端红点或数量展示。
+- 桌面端导入导出页需要支持创建事项台账、照片包、单事项 PDF 闭环单导出任务，并展示任务状态、刷新和下载动作。
+- 桌面端导入基础数据只对管理员显示；管理员可以选择 CSV 文件或粘贴 CSV 内容，提交后展示通过行、拒绝行和行级错误。
+- 审计日志页的导出按钮创建审计导出任务，下载统一从导入导出页的导出任务列表进入。
 
 ## 5. 前端运行模式
 
@@ -64,3 +69,23 @@
 - API 模式登录使用后端 `/auth/login`，刷新页面后通过 `/auth/me` 恢复当前用户。
 - API 模式的事项列表、详情、流程动作、图库、照片预览、照片上传、删除和通知均通过后端接口；失败时显示错误，不自动回退到 mock 数据。
 - 本地验证 API 模式时应先启动 PostgreSQL、MinIO、API，再启动 Web。照片上传依赖 MinIO/S3 上传地址可访问。
+
+## 6. 导入导出接口
+
+### 6.1 导出
+
+- `POST /exports/site-items`：创建事项台账导出任务，请求体复用事项列表过滤字段，如 `status`、`type`、`severity`、`sectionId`、`areaId`、`disciplineId`、`organizationId`、`overdue`、`search`。
+- `POST /exports/photo-package`：创建照片包导出任务，请求体同事项台账过滤字段。
+- `POST /exports/site-items/:id/pdf`：创建单事项 PDF 闭环单导出任务。
+- `POST /exports/audit`：创建审计导出任务，仅管理员可用，请求体复用审计查询字段，如 `resourceType`、`action`。
+- `GET /exports/:id`：刷新导出任务状态。
+- `GET /exports/:id/download`：下载成功任务，返回 `downloadUrl` 或 `contentBase64`、`fileName`、`mimeType`。
+
+导出权限：管理员、业主/监理、施工单位负责人可导出事项台账、照片包和可见事项 PDF；审计导出仅管理员可用。所有导出必须由后端按当前用户角色、单位和授权标段过滤。
+
+### 6.2 导入
+
+- `POST /imports/:kind`：创建基础数据导入任务，`kind` 取值为 `sections`、`organizations`、`areas`、`disciplines`、`users`。
+- `GET /imports/:id`：查看导入结果。
+
+导入请求体使用 `{ "csvText": "...", "sourceFileName": "import.csv" }`，并必须带 `Idempotency-Key`。导入仅管理员可用；导入结果必须展示 `acceptedRows`、`rejectedRows` 和 `errors`，用户导入结果不得暴露密码哈希。
