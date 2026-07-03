@@ -1,13 +1,9 @@
 import { loadConfig } from "./config.js";
-import { createStore } from "./data.js";
-import { createHttpServer } from "./http.js";
-import { buildRouter } from "./routes.js";
+import { createApiRuntime } from "./runtime/apiRuntime.js";
 
 const config = loadConfig();
-const store = createStore();
-const router = buildRouter(store, config);
-const server = createHttpServer(router, store, config);
+const runtime = await createApiRuntime(config);
 
-server.listen(config.port, config.host, () => {
-  console.log(`site-management api listening on http://${config.host}:${config.port}`);
+runtime.server.listen(config.port, config.host, () => {
+  console.log(`site-management api listening on http://${config.host}:${config.port} (${config.runtimeMode})`);
 });

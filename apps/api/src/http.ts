@@ -102,7 +102,7 @@ export function requireContext(request: ApiRequest): RequestContext {
   return request.context;
 }
 
-export function createHttpServer(router: Router, store: Store, config: ApiConfig) {
+export function createHttpServer(router: Router, config: ApiConfig) {
   return createServer(async (incoming, response) => {
     try {
       const method = incoming.method ?? "GET";

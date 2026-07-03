@@ -19,6 +19,7 @@ import {
   canAccessItem,
   canAccessSection,
   canAssignRectifier,
+  allowedWorkflowActions,
   canWorkflowOwner,
   publicUser,
   requireAdmin,
@@ -604,15 +605,7 @@ function itemDetail(store: Store, user: User, item: SiteItem) {
 }
 
 function allowedActions(user: User, item: SiteItem): WorkflowAction[] {
-  const actions: WorkflowAction[] = ["comment"];
-  if (canWorkflowOwner(user, item) && item.status === "pending_approval") actions.push("dispatch");
-  if (canAssignRectifier(user, item) && item.status !== "closed" && item.status !== "voided") actions.push("assign_rectifier");
-  if (item.responsibleUserId === user.id && item.status === "dispatched") actions.push("start_rectify");
-  if (item.responsibleUserId === user.id && item.status === "rectifying") actions.push("submit_review");
-  if (canWorkflowOwner(user, item) && item.status === "pending_acceptance") actions.push("close");
-  if (canWorkflowOwner(user, item) && item.status !== "closed") actions.push("void");
-  if (canWorkflowOwner(user, item) && (item.status === "closed" || item.status === "voided")) actions.push("reopen");
-  return actions;
+  return allowedWorkflowActions(user, item);
 }
 
 function bindPhotos(store: Store, user: User, item: SiteItem, photoIds: string[], stage: PhotoAttachment["stage"]): void {

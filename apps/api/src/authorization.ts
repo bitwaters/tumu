@@ -1,4 +1,4 @@
-import type { SiteItem, Store, User } from "./types.js";
+import type { SiteItem, Store, User, WorkflowAction } from "./types.js";
 
 export interface RequestContext {
   user: User;
@@ -50,4 +50,16 @@ export function visibleItems(user: User, store: Store): SiteItem[] {
 
 export function activeScopedSections(user: User, store: Store) {
   return store.sections.filter((section) => section.isActive && canAccessSection(user, section.id));
+}
+
+export function allowedWorkflowActions(user: User, item: SiteItem): WorkflowAction[] {
+  const actions: WorkflowAction[] = ["comment"];
+  if (canWorkflowOwner(user, item) && item.status === "pending_approval") actions.push("dispatch");
+  if (canAssignRectifier(user, item) && item.status !== "closed" && item.status !== "voided") actions.push("assign_rectifier");
+  if (item.responsibleUserId === user.id && item.status === "dispatched") actions.push("start_rectify");
+  if (item.responsibleUserId === user.id && item.status === "rectifying") actions.push("submit_review");
+  if (canWorkflowOwner(user, item) && item.status === "pending_acceptance") actions.push("close");
+  if (canWorkflowOwner(user, item) && item.status !== "closed") actions.push("void");
+  if (canWorkflowOwner(user, item) && (item.status === "closed" || item.status === "voided")) actions.push("reopen");
+  return actions;
 }
