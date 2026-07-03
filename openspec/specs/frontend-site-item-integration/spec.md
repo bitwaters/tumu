@@ -1,7 +1,7 @@
 # frontend-site-item-integration Specification
 
 ## Purpose
-TBD - created by archiving change frontend-api-integration. Update Purpose after archive.
+Defines frontend integration for site item lists, details, create/edit forms, workflow actions, photo binding, and role-scoped item behavior.
 ## Requirements
 ### Requirement: API-Backed Site Item Lists
 The frontend SHALL load site item lists from `/site-items` with search and filter query parameters matching the existing UI controls.
@@ -58,4 +58,3 @@ The frontend SHALL call workflow endpoints for dispatch, assign rectifier, start
 #### Scenario: Workflow mutation forbidden
 - **WHEN** the backend returns 403 for a workflow action
 - **THEN** the frontend shows an error and reloads item detail so stale action buttons disappear
-

@@ -1,7 +1,7 @@
 # frontend-photo-integration Specification
 
 ## Purpose
-TBD - created by archiving change frontend-api-integration. Update Purpose after archive.
+Defines frontend integration for the personal photo gallery, presigned uploads, preview loading, unbound photo selection, and photo deletion.
 ## Requirements
 ### Requirement: API-Backed Personal Gallery
 The frontend SHALL load the current user's photo gallery from `/photos` and keep unbound photo selection scoped to the current user.
@@ -46,4 +46,3 @@ The frontend SHALL display bound photo evidence from site item detail rather tha
 #### Scenario: Item detail evidence
 - **WHEN** item detail contains grouped discovery, rectification, or review photos
 - **THEN** the frontend renders those grouped photos with snapshot metadata returned by the backend
-

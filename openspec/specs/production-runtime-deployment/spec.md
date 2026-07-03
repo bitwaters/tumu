@@ -1,7 +1,7 @@
 # production-runtime-deployment Specification
 
 ## Purpose
-TBD - created by archiving change production-deployment-readiness. Update Purpose after archive.
+Defines the production Docker Compose runtime, environment template, deployment scripts, migration flow, and smoke validation needed for project intranet deployment.
 ## Requirements
 ### Requirement: Production Compose Runtime
 The system SHALL provide a production Docker Compose runtime that starts Web, API, PostgreSQL, Redis, and MinIO/S3-compatible storage using production commands, persistent volumes, health checks, restart policies, and environment-driven configuration.
@@ -38,4 +38,3 @@ The system SHALL document first deployment, upgrade, rollback, health checks, lo
 #### Scenario: Operator performs first deployment
 - **WHEN** an operator follows the production runbook from a clean server
 - **THEN** they can prepare environment values, build images, apply migrations, start services, run smoke checks, and record the deployed Git commit
-

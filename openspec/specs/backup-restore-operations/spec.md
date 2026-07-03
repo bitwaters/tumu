@@ -1,7 +1,7 @@
 # backup-restore-operations Specification
 
 ## Purpose
-TBD - created by archiving change production-deployment-readiness. Update Purpose after archive.
+Defines backup and restore operations for production PostgreSQL data and MinIO/S3 object storage, including validation and operator-facing scripts.
 ## Requirements
 ### Requirement: PostgreSQL Backup
 The system SHALL provide a PostgreSQL backup script that creates timestamped database dumps from production environment configuration and writes them to the configured backup directory.
@@ -38,4 +38,3 @@ The system SHALL document backup frequency recommendations, retention expectatio
 #### Scenario: Administrator reviews backup status
 - **WHEN** an administrator follows the backup runbook
 - **THEN** they can identify the newest database backup, newest object storage backup, backup sizes, and the latest restore verification result
-

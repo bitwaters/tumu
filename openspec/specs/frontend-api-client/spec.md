@@ -1,7 +1,7 @@
 # frontend-api-client Specification
 
 ## Purpose
-TBD - created by archiving change frontend-api-integration. Update Purpose after archive.
+Defines the frontend API runtime mode, authenticated client behavior, session persistence, error handling, and typed backend API wrappers.
 ## Requirements
 ### Requirement: Configurable API Mode
 The frontend SHALL default to API-backed runtime mode and SHALL allow explicit mock fallback through configuration.
@@ -50,4 +50,3 @@ The frontend SHALL persist the login token across page refreshes and validate th
 #### Scenario: Logout
 - **WHEN** the user logs out
 - **THEN** the frontend clears the token and current user state
-

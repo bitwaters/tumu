@@ -1,7 +1,7 @@
 # frontend-admin-integration Specification
 
 ## Purpose
-TBD - created by archiving change frontend-api-integration. Update Purpose after archive.
+Defines frontend integration for administrative and operational backend APIs, including notifications, drawing administration, master data, user management, audit logs, and authorization-aware admin surfaces.
 ## Requirements
 ### Requirement: API-Backed Notifications
 The frontend SHALL load notifications and unread counts from backend notification endpoints.
@@ -50,4 +50,3 @@ The desktop audit page SHALL load audit logs from `/audit/logs` and preserve fil
 #### Scenario: Unauthorized audit access
 - **WHEN** a non-admin opens audit logs through stale navigation
 - **THEN** the frontend shows a forbidden state and does not display stale mock audit data
-
