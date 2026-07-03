@@ -22,6 +22,13 @@ The system SHALL write an audit record when a user successfully changes their ow
 - **WHEN** a password change succeeds
 - **THEN** the audit log contains a `change_password` record for the current user
 
+### Requirement: Password Change Token Invalidation
+The system SHALL invalidate previously issued tokens for a user after that user changes their password.
+
+#### Scenario: Old token rejected after password change
+- **WHEN** a user changes their password successfully
+- **THEN** requests using a token issued before the password change are rejected by authenticated endpoints
+
 ### Requirement: Profile Password Form
 The frontend SHALL replace the profile password placeholder with a form that submits the current password and new password to the backend.
 
