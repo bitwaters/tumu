@@ -12,6 +12,12 @@
 - `TEST_DATABASE_URL=... npm run test:api`：运行包含 Prisma/PostgreSQL 路由合同测试的后端测试；未设置 `TEST_DATABASE_URL` 时该组数据库测试会自动跳过。
 - `npm run infra:up`：启动 PostgreSQL、Redis、MinIO、API 和 Web。
 - `npm run infra:down`：停止本地基础设施。
+- `npm run prod:preflight`：读取 `.env.production` 并验证生产部署必填项、密钥、备份目录和 Compose 配置。
+- `npm run prod:build`：构建生产 API/Web 镜像。
+- `npm run prod:migrate`：对生产数据库执行 Prisma migrations，不写入演示 seed。
+- `npm run prod:up` / `npm run prod:down` / `npm run prod:status`：管理生产 Compose 服务。
+- `npm run prod:smoke`：验证生产 API/Web 健康、登录、事项列表和通知计数。
+- `npm run backup:db` / `npm run backup:objects`：创建生产数据库和对象存储备份。
 
 ## Web/API 联调
 
@@ -66,6 +72,18 @@ TEST_DATABASE_URL=postgresql://site_user:site_password@127.0.0.1:55432/site_mana
 ```
 
 如果只想验证主业务库，可以使用 `DATABASE_URL` 运行 `db:migrate`、`db:seed` 和 `API_RUNTIME=prisma npm run start:api`；不要把共享或生产数据库作为 `TEST_DATABASE_URL` 执行 reset。
+
+## 生产部署
+
+生产部署使用 [production-deployment.md](/Users/yang/Documents/project123/docs/production-deployment.md) 和 `.env.production`。生产环境与本地开发的关键差异：
+
+- 使用 `infra/docker-compose.prod.yml`，不挂载源码、不运行 Vite dev server。
+- Web 使用 Nginx 托管构建后的静态文件。
+- API 使用编译后的 `dist/index.js`。
+- 密钥、数据库密码、对象存储密码和公开访问地址都来自 `.env.production`。
+- 数据库迁移必须通过 `npm run prod:migrate` 显式执行。
+- 生产环境禁止执行 `db:seed`、`test:db:reset` 或任何 reset 类命令。
+- 备份与恢复按 [backup-restore.md](/Users/yang/Documents/project123/docs/backup-restore.md) 执行。
 
 ## 默认测试账号
 

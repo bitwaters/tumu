@@ -5,6 +5,9 @@
   "workspaces": [
     "apps/*"
   ],
+  "overrides": {
+    "@hono/node-server": "1.19.13"
+  },
   "scripts": {
     "dev:web": "npm --workspace @site-management/web run dev",
     "build:web": "npm --workspace @site-management/web run build",
@@ -19,6 +22,18 @@
     "db:migrate": "npm --workspace @site-management/api run prisma:migrate",
     "db:seed": "npm --workspace @site-management/api run prisma:seed",
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
-    "infra:down": "docker compose -f infra/docker-compose.yml down"
+    "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "prod:config": "docker compose --env-file .env.production -f infra/docker-compose.prod.yml config",
+    "prod:build": "docker compose --env-file .env.production -f infra/docker-compose.prod.yml build",
+    "prod:up": "docker compose --env-file .env.production -f infra/docker-compose.prod.yml up -d",
+    "prod:down": "docker compose --env-file .env.production -f infra/docker-compose.prod.yml down",
+    "prod:status": "docker compose --env-file .env.production -f infra/docker-compose.prod.yml ps",
+    "prod:preflight": "sh scripts/prod/preflight.sh",
+    "prod:migrate": "sh scripts/prod/migrate.sh",
+    "prod:smoke": "node scripts/prod/smoke.mjs",
+    "backup:db": "sh scripts/prod/backup-db.sh",
+    "restore:db": "sh scripts/prod/restore-db.sh",
+    "backup:objects": "sh scripts/prod/backup-objects.sh",
+    "restore:objects": "sh scripts/prod/restore-objects.sh"
   }
 }
