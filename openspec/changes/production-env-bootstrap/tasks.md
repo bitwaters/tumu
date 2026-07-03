@@ -1,8 +1,8 @@
 ## 1. Environment Bootstrap Script
 
-- [ ] 1.1 Add `scripts/prod/init-env.mjs` to generate `.env.production` with random production secrets and host-derived public URLs.
-- [ ] 1.2 Add `prod:init-env` package script and ensure `.env.production` remains ignored.
-- [ ] 1.3 Add focused script tests for host validation, no-overwrite behavior, generated secret replacement, and force overwrite.
+- [x] 1.1 Add `scripts/prod/init-env.mjs` to generate `.env.production` with random production secrets and host-derived public URLs.
+- [x] 1.2 Add `prod:init-env` package script and ensure `.env.production` remains ignored.
+- [x] 1.3 Add focused script tests for host validation, no-overwrite behavior, generated secret replacement, and force overwrite.
 
 ## 2. Documentation And Verification
 

@@ -8,4 +8,5 @@ apps/*/vite.config.d.ts
 .DS_Store
 .env
 .env.local
+.env.production
 .vite/
