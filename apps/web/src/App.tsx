@@ -5,7 +5,7 @@ import { readFrontendConfig, type FrontendRuntimeConfig } from "./api/env";
 import { AuditApi, type AuditLogQuery } from "./api/audit";
 import { AuthApi } from "./api/auth";
 import { IdempotencyKeyStore } from "./api/idempotency";
-import { MasterDataApi, type MasterDataPayload } from "./api/masterData";
+import { MasterDataApi, type MasterDataKind, type MasterDataPayload, type MasterDataRecord, type MasterDataWriteInput } from "./api/masterData";
 import { NotificationsApi } from "./api/notifications";
 import { PhotosApi, type PhotoCompleteInput, type PhotoListQuery } from "./api/photos";
 import { SiteItemsApi, flattenGroupedPhotos, type CreateSiteItemInput, type SiteItemDetailPayload, type SiteItemListQuery, type SiteItemWorkflowInput, type UpdateSiteItemInput } from "./api/siteItems";
@@ -442,6 +442,78 @@ function useAppState() {
       setDirectoryState("error");
     }
   }, [authStatus, masterDataApi, runtimeConfig.useMocks, usersApi]);
+
+  async function createMasterData(kind: MasterDataKind, input: MasterDataWriteInput): Promise<boolean> {
+    if (!currentUser || currentUser.role !== "admin") return false;
+    if (!runtimeConfig.useMocks) {
+      try {
+        await masterDataApi.create(kind, input);
+        await refreshDirectory();
+        setDataError(null);
+        return true;
+      } catch (error) {
+        setDataError(errorMessage(error));
+        return false;
+      }
+    }
+    const projectId = "project-power-001";
+    const base = {
+      id: `${kind}-${Date.now()}`,
+      projectId,
+      name: input.name || "未命名",
+      code: input.code || `NEW-${Date.now()}`,
+      isActive: input.isActive ?? true
+    };
+    setDirectory((prev) => {
+      if (kind === "organizations") {
+        return { ...prev, organizations: [{ ...base, type: input.type || "contractor" }, ...prev.organizations] };
+      }
+      if (kind === "areas") {
+        return { ...prev, areas: [{ ...base, parentId: input.parentId || undefined }, ...prev.areas] };
+      }
+      if (kind === "disciplines") {
+        return { ...prev, disciplines: [base, ...prev.disciplines] };
+      }
+      return { ...prev, sections: [base, ...prev.sections] };
+    });
+    setDataError(null);
+    return true;
+  }
+
+  async function updateMasterData(kind: MasterDataKind, record: MasterDataRecord, input: MasterDataWriteInput): Promise<boolean> {
+    if (!currentUser || currentUser.role !== "admin") return false;
+    if (!runtimeConfig.useMocks) {
+      try {
+        await masterDataApi.update(kind, record.id, input);
+        await refreshDirectory();
+        setDataError(null);
+        return true;
+      } catch (error) {
+        setDataError(errorMessage(error));
+        return false;
+      }
+    }
+    setDirectory((prev) => {
+      if (kind === "organizations") {
+        return {
+          ...prev,
+          organizations: prev.organizations.map((item) => (item.id === record.id ? { ...item, ...input, type: input.type || item.type } : item))
+        };
+      }
+      if (kind === "areas") {
+        return {
+          ...prev,
+          areas: prev.areas.map((item) => (item.id === record.id ? { ...item, ...input, parentId: input.parentId || undefined } : item))
+        };
+      }
+      if (kind === "disciplines") {
+        return { ...prev, disciplines: prev.disciplines.map((item) => (item.id === record.id ? { ...item, ...input } : item)) };
+      }
+      return { ...prev, sections: prev.sections.map((item) => (item.id === record.id ? { ...item, ...input } : item)) };
+    });
+    setDataError(null);
+    return true;
+  }
 
   const refreshDrawings = useCallback(async () => {
     if (runtimeConfig.useMocks || authStatus !== "authenticated") return;
@@ -1104,6 +1176,8 @@ function useAppState() {
     refreshNotifications,
     refreshAuditLogs,
     refreshDirectory,
+    createMasterData,
+    updateMasterData,
     refreshDrawings,
     refreshDrawingRevisions,
     refreshDrawingPages,
@@ -2794,17 +2868,152 @@ function MasterDataPage({ state }: { state: AppState }) {
   }, [state.refreshDirectory]);
   return (
     <div className="stack">
-      <PageHeader title="基础数据" meta="标段、单位、区域、专业" action={<Button>Excel 导入</Button>} />
+      <PageHeader title="基础数据" meta="标段、单位、区域、专业" action={<Button variant="secondary" disabled>Excel 导入</Button>} />
       {state.directoryState === "loading" ? <p className="muted">正在刷新基础数据...</p> : null}
       {state.directoryState === "error" && state.dataError ? <p className="error-text">{state.dataError}</p> : null}
       <div className="two-col">
-        <MasterList title="标段" rows={state.directory.sections.map((item) => [item.code, item.name])} />
-        <MasterList title="单位" rows={state.directory.organizations.map((item) => [item.type, item.name])} />
-        <MasterList title="区域" rows={state.directory.areas.map((item) => [item.code, item.name])} />
-        <MasterList title="专业" rows={state.directory.disciplines.map((item) => [item.code, item.name])} />
+        <MasterDataPanel kind="sections" title="标段" records={state.directory.sections} state={state} />
+        <MasterDataPanel kind="organizations" title="单位" records={state.directory.organizations} state={state} />
+        <MasterDataPanel kind="areas" title="区域" records={state.directory.areas} state={state} />
+        <MasterDataPanel kind="disciplines" title="专业" records={state.directory.disciplines} state={state} />
       </div>
     </div>
   );
+}
+
+function MasterDataPanel({
+  kind,
+  title,
+  records,
+  state
+}: {
+  kind: MasterDataKind;
+  title: string;
+  records: MasterDataRecord[];
+  state: AppState;
+}) {
+  const [editing, setEditing] = useState<MasterDataRecord | "new" | null>(null);
+  return (
+    <Card>
+      <div className="card-title-row">
+        <h3>{title}</h3>
+        <Button variant="secondary" onClick={() => setEditing("new")}>新增</Button>
+      </div>
+      {editing ? (
+        <MasterDataForm
+          kind={kind}
+          record={editing === "new" ? undefined : editing}
+          state={state}
+          onCancel={() => setEditing(null)}
+          onSaved={() => setEditing(null)}
+        />
+      ) : null}
+      <DataTable
+        columns={["编码/类型", "名称", "状态", "操作"]}
+        rows={records.map((record) => [
+          masterDataMeta(kind, record),
+          record.name,
+          record.isActive ? "启用" : "停用",
+          <div className="action-row compact-actions" key={record.id}>
+            <Button variant="secondary" onClick={() => setEditing(record)}>编辑</Button>
+            <Button
+              variant="ghost"
+              onClick={() => state.updateMasterData(kind, record, { isActive: !record.isActive })}
+            >
+              {record.isActive ? "停用" : "启用"}
+            </Button>
+          </div>
+        ])}
+      />
+    </Card>
+  );
+}
+
+function MasterDataForm({
+  kind,
+  record,
+  state,
+  onCancel,
+  onSaved
+}: {
+  kind: MasterDataKind;
+  record?: MasterDataRecord;
+  state: AppState;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const [values, setValues] = useState<MasterDataWriteInput>({
+    name: record?.name || "",
+    code: record && "code" in record ? record.code : "",
+    isActive: record?.isActive ?? true,
+    type: kind === "organizations" && record && "type" in record ? record.type : "contractor",
+    parentId: kind === "areas" && record && "parentId" in record ? record.parentId || "" : ""
+  });
+  const canSave = Boolean(values.name?.trim() && (kind === "organizations" || values.code?.trim()));
+  async function save() {
+    if (!canSave) return;
+    const input: MasterDataWriteInput = {
+      name: values.name,
+      code: kind === "organizations" ? undefined : values.code,
+      isActive: values.isActive,
+      type: kind === "organizations" ? values.type : undefined,
+      parentId: kind === "areas" ? values.parentId || null : undefined
+    };
+    const saved = record
+      ? await state.updateMasterData(kind, record, input)
+      : await state.createMasterData(kind, input);
+    if (saved) onSaved();
+  }
+  return (
+    <div className="inline-editor">
+      <div className="form-grid">
+        {kind !== "organizations" ? (
+          <Field label="编码">
+            <TextInput value={values.code || ""} onChange={(event) => setValues({ ...values, code: event.target.value })} />
+          </Field>
+        ) : null}
+        <Field label="名称">
+          <TextInput value={values.name || ""} onChange={(event) => setValues({ ...values, name: event.target.value })} />
+        </Field>
+        {kind === "organizations" ? (
+          <Field label="单位类型">
+            <Select value={values.type} onChange={(event) => setValues({ ...values, type: event.target.value as Organization["type"] })}>
+              <option value="owner">业主</option>
+              <option value="supervisor">监理</option>
+              <option value="contractor">施工单位</option>
+              <option value="other">其他</option>
+            </Select>
+          </Field>
+        ) : null}
+        {kind === "areas" ? (
+          <Field label="上级区域">
+            <Select value={values.parentId || ""} onChange={(event) => setValues({ ...values, parentId: event.target.value || null })}>
+              <option value="">无</option>
+              {state.directory.areas
+                .filter((area) => area.id !== record?.id)
+                .map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
+            </Select>
+          </Field>
+        ) : null}
+        <Field label="状态">
+          <Select value={values.isActive ? "active" : "inactive"} onChange={(event) => setValues({ ...values, isActive: event.target.value === "active" })}>
+            <option value="active">启用</option>
+            <option value="inactive">停用</option>
+          </Select>
+        </Field>
+      </div>
+      {state.dataError ? <p className="error-text">{state.dataError}</p> : null}
+      <div className="action-row">
+        <Button variant="secondary" onClick={onCancel}>取消</Button>
+        <Button disabled={!canSave} onClick={save}>保存</Button>
+      </div>
+    </div>
+  );
+}
+
+function masterDataMeta(kind: MasterDataKind, record: MasterDataRecord): string {
+  if (kind === "organizations" && "type" in record) return record.type;
+  return "code" in record ? record.code : "-";
 }
 
 function UsersPage({ state }: { state: AppState }) {
@@ -2865,15 +3074,6 @@ function AuditPage({ state }: { state: AppState }) {
         rows={state.auditLogRecords.map((log) => [formatDate(log.createdAt), getUser(log.actorId)?.name || "-", log.action, log.resourceType, log.resourceId])}
       />
     </div>
-  );
-}
-
-function MasterList({ title, rows }: { title: string; rows: string[][] }) {
-  return (
-    <Card>
-      <h3>{title}</h3>
-      <DataTable columns={["编码/类型", "名称"]} rows={rows} />
-    </Card>
   );
 }
 

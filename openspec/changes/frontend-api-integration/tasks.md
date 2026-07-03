@@ -46,7 +46,7 @@
 
 - [x] 6.1 Connect notification list, unread count, mark-read, and read-all to `/notifications` endpoints.
 - [x] 6.2 Connect drawing management read paths to `/drawings`, revisions, pages, preview, and set-current endpoints.
-- [ ] 6.3 Connect master data pages to `/master-data/sections`, `/organizations`, `/areas`, and `/disciplines` list/create/update endpoints.
+- [x] 6.3 Connect master data pages to `/master-data/sections`, `/organizations`, `/areas`, and `/disciplines` list/create/update endpoints.
 - [ ] 6.4 Connect user management to `/users`, create, update, disable, and reset-password endpoints.
 - [x] 6.5 Connect audit log page to `/audit/logs` with supported filters and forbidden-state handling.
 - [x] 6.6 Keep import/export UI as placeholders unless backend endpoints already exist for a specific action.

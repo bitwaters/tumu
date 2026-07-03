@@ -104,15 +104,16 @@ export class MasterDataService {
     kind: MasterDataKind,
     input: NormalizedMasterDataCreateInput
   ): Promise<MasterDataRecord> {
-    if (kind === "sections") return repository.createSection(input);
+    if (kind === "sections") return repository.createSection({ ...input, code: input.code ?? "" });
     if (kind === "organizations") {
       return repository.createOrganization({
-        ...input,
+        projectId: input.projectId,
+        name: input.name,
         type: input.type ?? "contractor"
       });
     }
-    if (kind === "areas") return repository.createArea(input);
-    return repository.createDiscipline(input);
+    if (kind === "areas") return repository.createArea({ ...input, code: input.code ?? "" });
+    return repository.createDiscipline({ ...input, code: input.code ?? "" });
   }
 
   private updateByKind(
@@ -142,7 +143,7 @@ type MasterDataCreateInput = {
 type NormalizedMasterDataCreateInput = {
   projectId: string;
   name: string;
-  code: string;
+  code?: string;
   type?: OrganizationType;
   parentId?: string;
 };
@@ -152,7 +153,7 @@ function requireAdmin(user: User): void {
 }
 
 function validateMasterDataInput(kind: MasterDataKind, input: MasterDataCreateInput | UpdateMasterDataInput, partial = false): void {
-  if (!partial && (!input.name || !input.code)) throw badRequest("name and code are required");
+  if (!partial && (!input.name || (kind !== "organizations" && !input.code))) throw badRequest(kind === "organizations" ? "name is required" : "name and code are required");
   if (input.name !== undefined && !input.name.trim()) throw badRequest("name is required");
   if (input.code !== undefined && !input.code.trim()) throw badRequest("code is required");
   if (kind === "organizations" && input.type && !["owner", "supervisor", "contractor", "other"].includes(input.type)) {
@@ -164,7 +165,7 @@ function normalizeCreateInput(input: MasterDataCreateInput, projectId: string): 
   return {
     projectId,
     name: input.name ?? "",
-    code: input.code ?? "",
+    code: input.code,
     type: input.type,
     parentId: input.parentId
   };

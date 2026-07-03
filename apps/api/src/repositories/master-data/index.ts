@@ -14,7 +14,9 @@ export interface CreateSectionInput {
   code: string;
 }
 
-export interface CreateOrganizationInput extends CreateSectionInput {
+export interface CreateOrganizationInput {
+  projectId: string;
+  name: string;
   type: OrganizationType;
 }
 
