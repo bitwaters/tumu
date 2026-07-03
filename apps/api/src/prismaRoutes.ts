@@ -89,6 +89,14 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
       active: parseOptionalBoolean(request.query.get("active"))
     });
   });
+  router.add("GET", "/users/visible", async (request) => {
+    const actor = await viewer(request);
+    return usersService.listVisible(actor, {
+      search: queryString(request, "search"),
+      role: queryString(request, "role") as Role | undefined,
+      active: parseOptionalBoolean(request.query.get("active"))
+    });
+  });
   router.add("POST", "/users", async (request) => {
     const body = assertRecord(request.body);
     return usersService.create(await viewer(request), {

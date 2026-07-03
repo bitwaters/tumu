@@ -1,4 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ApiClient, ApiError } from "./api/client";
+import { readFrontendConfig, type FrontendRuntimeConfig } from "./api/env";
+import { AuditApi, type AuditLogQuery } from "./api/audit";
+import { AuthApi } from "./api/auth";
+import { IdempotencyKeyStore } from "./api/idempotency";
+import { MasterDataApi, type MasterDataPayload } from "./api/masterData";
+import { NotificationsApi } from "./api/notifications";
+import { PhotosApi, type PhotoCompleteInput, type PhotoListQuery } from "./api/photos";
+import { SiteItemsApi, flattenGroupedPhotos, type CreateSiteItemInput, type SiteItemDetailPayload, type SiteItemListQuery, type SiteItemWorkflowInput } from "./api/siteItems";
+import { clearStoredToken, readStoredToken, saveStoredToken } from "./api/session";
+import { UsersApi } from "./api/users";
 import {
   areas,
   auditLogs,
@@ -39,10 +50,15 @@ import {
   visibleItems
 } from "./model";
 import type {
+  Area,
+  AuditLog,
+  Discipline,
   DraftItem,
   Notification,
+  Organization,
   PhotoAttachment,
   PhotoStage,
+  Section,
   SiteItem,
   SiteItemStatus,
   UploadQueueItem,
@@ -56,7 +72,11 @@ type RoleScopedTab<T extends string> = { id: T; label: string; roles?: Array<Use
 type MobileRoute = "todo" | "items" | "photo" | "dashboard" | "profile";
 type DesktopRoute = "dashboard" | "todo" | "items" | "photo" | "drawings" | "master" | "users" | "exports" | "audit" | "profile";
 type CreateItemOptions = { requestKey: string; selectedPhotoIds?: string[] };
+type WorkflowOptions = SiteItemWorkflowInput & { userId?: string; organizationId?: string };
 type FilterSelectOption = { value: string; label: string };
+type AuthStatus = "checking" | "anonymous" | "authenticated";
+type LoadState = "idle" | "loading" | "error";
+type DirectoryData = MasterDataPayload & { users: User[] };
 type ItemFilterValues = {
   status: string;
   type: string;
@@ -66,6 +86,22 @@ type ItemFilterValues = {
   disciplineId: string;
   organizationId: string;
   timing: string;
+};
+
+const initialDirectory: DirectoryData = {
+  sections,
+  organizations,
+  areas,
+  disciplines,
+  users
+};
+
+const emptyDirectory: DirectoryData = {
+  sections: [],
+  organizations: [],
+  areas: [],
+  disciplines: [],
+  users: []
 };
 
 const mobileTabs: Array<RoleScopedTab<MobileRoute> & { icon: string }> = [
@@ -113,6 +149,73 @@ function fromDateTimeLocalInput(value: string) {
   return date.toISOString();
 }
 
+function errorMessage(error: unknown): string {
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof Error) return error.message;
+  return "操作失败，请稍后重试";
+}
+
+function upsertById<T extends { id: string }>(items: T[], item: T): T[] {
+  const exists = items.some((candidate) => candidate.id === item.id);
+  if (exists) return items.map((candidate) => (candidate.id === item.id ? item : candidate));
+  return [item, ...items];
+}
+
+function siteItemListQuery(filters?: ItemFilterValues, search?: string): SiteItemListQuery {
+  const query: SiteItemListQuery = {};
+  const trimmedSearch = search?.trim();
+  if (trimmedSearch) query.search = trimmedSearch;
+  if (filters?.status && !["all", "open", "mine"].includes(filters.status)) query.status = filters.status as SiteItemStatus;
+  if (filters?.type && filters.type !== "all") query.type = filters.type as SiteItem["type"];
+  if (filters?.severity && filters.severity !== "all") query.severity = filters.severity as SiteItem["severity"];
+  if (filters?.sectionId && filters.sectionId !== "all") query.sectionId = filters.sectionId;
+  if (filters?.areaId && filters.areaId !== "all") query.areaId = filters.areaId;
+  if (filters?.disciplineId && filters.disciplineId !== "all") query.disciplineId = filters.disciplineId;
+  if (filters?.organizationId && filters.organizationId !== "all") query.organizationId = filters.organizationId;
+  if (filters?.timing === "overdue") query.overdue = true;
+  return query;
+}
+
+function scopedItems(state: AppState, user: User) {
+  return state.runtimeConfig.useMocks ? visibleItems(user, state.items) : state.items;
+}
+
+function defaultScopedListItems(state: AppState, user: User) {
+  return state.runtimeConfig.useMocks ? defaultListItems(user, state.items) : state.items;
+}
+
+function allowedItemActions(state: AppState, user: User, item: SiteItem): WorkflowAction[] {
+  if (state.runtimeConfig.useMocks) return allowedActions(user, item);
+  return state.allowedActionsByItem[item.id] ?? [];
+}
+
+function directoryItem<T extends { id: string }>(items: T[], id?: string): T | undefined {
+  return items.find((item) => item.id === id);
+}
+
+function ownerCandidatesForDirectory(directory: DirectoryData, sectionId?: string) {
+  const candidates = directory.users.filter(
+    (user) =>
+      user.isActive &&
+      (user.role === "supervisor" || user.role === "admin") &&
+      (!sectionId || user.sectionScopeIds.includes(sectionId))
+  );
+  return [
+    ...candidates.filter((user) => user.role === "supervisor"),
+    ...candidates.filter((user) => user.role === "admin")
+  ];
+}
+
+function activeRectifiersForDirectory(directory: DirectoryData, organizationId: string, sectionId?: string) {
+  return directory.users.filter(
+    (user) =>
+      user.role === "rectifier" &&
+      user.organizationId === organizationId &&
+      user.isActive &&
+      (!sectionId || user.sectionScopeIds.includes(sectionId))
+  );
+}
+
 function visibleDesktopTabs(user: User) {
   return desktopTabs.filter((tab) => !tab.roles || tab.roles.includes(user.role));
 }
@@ -143,11 +246,45 @@ function ownerCandidatesForSection(sectionId?: string) {
 }
 
 function useAppState() {
+  const runtimeConfig = useMemo(() => readFrontendConfig(), []);
+  const apiClient = useMemo(
+    () =>
+      new ApiClient({
+        baseUrl: runtimeConfig.apiBaseUrl,
+        onUnauthorized: () => {
+          setApiUser(null);
+          setAuthStatus("anonymous");
+        }
+      }),
+    [runtimeConfig.apiBaseUrl]
+  );
+  const auditApi = useMemo(() => new AuditApi(apiClient), [apiClient]);
+  const authApi = useMemo(() => new AuthApi(apiClient), [apiClient]);
+  const masterDataApi = useMemo(() => new MasterDataApi(apiClient), [apiClient]);
+  const siteItemsApi = useMemo(() => new SiteItemsApi(apiClient), [apiClient]);
+  const photosApi = useMemo(() => new PhotosApi(apiClient), [apiClient]);
+  const notificationsApi = useMemo(() => new NotificationsApi(apiClient), [apiClient]);
+  const usersApi = useMemo(() => new UsersApi(apiClient), [apiClient]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [items, setItems] = useState<SiteItem[]>(siteItems);
-  const [photos, setPhotos] = useState<PhotoAttachment[]>(initialPhotos);
-  const [logs, setLogs] = useState<WorkflowLog[]>(initialWorkflowLogs);
-  const [notifications, setNotifications] = useState<Notification[]>(initialNotifications);
+  const [apiUser, setApiUser] = useState<User | null>(null);
+  const [authStatus, setAuthStatus] = useState<AuthStatus>(() => (runtimeConfig.useMocks || !readStoredToken() ? "anonymous" : "checking"));
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [itemListState, setItemListState] = useState<LoadState>("idle");
+  const [itemDetailState, setItemDetailState] = useState<LoadState>("idle");
+  const [photoListState, setPhotoListState] = useState<LoadState>("idle");
+  const [notificationState, setNotificationState] = useState<LoadState>("idle");
+  const [auditLogState, setAuditLogState] = useState<LoadState>("idle");
+  const [directoryState, setDirectoryState] = useState<LoadState>("idle");
+  const [items, setItems] = useState<SiteItem[]>(() => (runtimeConfig.useMocks ? siteItems : []));
+  const [photos, setPhotos] = useState<PhotoAttachment[]>(() => (runtimeConfig.useMocks ? initialPhotos : []));
+  const [galleryPhotos, setGalleryPhotos] = useState<PhotoAttachment[]>(() => (runtimeConfig.useMocks ? initialPhotos : []));
+  const [photoPreviewUrls, setPhotoPreviewUrls] = useState<Record<string, string>>({});
+  const [logs, setLogs] = useState<WorkflowLog[]>(() => (runtimeConfig.useMocks ? initialWorkflowLogs : []));
+  const [allowedActionsByItem, setAllowedActionsByItem] = useState<Record<string, WorkflowAction[]>>({});
+  const [notifications, setNotifications] = useState<Notification[]>(() => (runtimeConfig.useMocks ? initialNotifications : []));
+  const [auditLogRecords, setAuditLogRecords] = useState<AuditLog[]>(() => (runtimeConfig.useMocks ? auditLogs : []));
+  const [directory, setDirectory] = useState<DirectoryData>(() => (runtimeConfig.useMocks ? initialDirectory : emptyDirectory));
   const [drafts, setDrafts] = useState<DraftItem[]>([]);
   const [activeDraft, setActiveDraft] = useState<DraftItem | null>(null);
   const [uploadQueue, setUploadQueue] = useState<UploadQueueItem[]>([]);
@@ -157,15 +294,271 @@ function useAppState() {
   const [desktopRoute, setDesktopRoute] = useState<DesktopRoute>("dashboard");
   const [showNotifications, setShowNotifications] = useState(false);
   const idempotencyKeys = useRef(new Set<string>());
+  const apiIdempotencyKeys = useRef(new IdempotencyKeyStore());
 
-  const currentUser = currentUserId ? users.find((user) => user.id === currentUserId) ?? null : null;
+  const currentUser = runtimeConfig.useMocks ? (currentUserId ? users.find((user) => user.id === currentUserId) ?? null : null) : apiUser;
+
+  const mergeItemDetail = useCallback((detail: SiteItemDetailPayload) => {
+    const detailPhotos = flattenGroupedPhotos(detail.photos);
+    setItems((prev) => upsertById(prev, detail));
+    setPhotos((prev) => [...prev.filter((photo) => photo.siteItemId !== detail.id), ...detailPhotos]);
+    setLogs((prev) => [...prev.filter((log) => log.siteItemId !== detail.id), ...detail.workflowLogs]);
+    setAllowedActionsByItem((prev) => ({ ...prev, [detail.id]: detail.allowedActions }));
+  }, []);
+
+  const refreshSiteItems = useCallback(
+    async (filters?: ItemFilterValues, search?: string) => {
+      if (runtimeConfig.useMocks || authStatus !== "authenticated") return;
+      setItemListState("loading");
+      try {
+        const loadedItems = await siteItemsApi.list(siteItemListQuery(filters, search));
+        setItems(loadedItems);
+        setAllowedActionsByItem((prev) => ({
+          ...prev,
+          ...Object.fromEntries(
+            loadedItems
+              .filter((item) => item.allowedActions)
+              .map((item) => [item.id, item.allowedActions ?? []])
+          )
+        }));
+        setDataError(null);
+        setItemListState("idle");
+      } catch (error) {
+        setDataError(errorMessage(error));
+        setItemListState("error");
+      }
+    },
+    [authStatus, runtimeConfig.useMocks, siteItemsApi]
+  );
+
+  const refreshItemDetail = useCallback(
+    async (itemId: string) => {
+      if (runtimeConfig.useMocks || authStatus !== "authenticated") return;
+      setItemDetailState("loading");
+      try {
+        const detail = await siteItemsApi.detail(itemId);
+        mergeItemDetail(detail);
+        setDataError(null);
+        setItemDetailState("idle");
+      } catch (error) {
+        setDataError(errorMessage(error));
+        setItemDetailState("error");
+      }
+    },
+    [authStatus, mergeItemDetail, runtimeConfig.useMocks, siteItemsApi]
+  );
+
+  const refreshPhotos = useCallback(
+    async (query: PhotoListQuery = {}) => {
+      if (runtimeConfig.useMocks || authStatus !== "authenticated") return;
+      setPhotoListState("loading");
+      try {
+        const loadedPhotos = await photosApi.list(query);
+        setGalleryPhotos(loadedPhotos);
+        setDataError(null);
+        setPhotoListState("idle");
+      } catch (error) {
+        setDataError(errorMessage(error));
+        setPhotoListState("error");
+      }
+    },
+    [authStatus, photosApi, runtimeConfig.useMocks]
+  );
+
+  const loadPhotoPreview = useCallback(
+    async (photoId: string) => {
+      if (runtimeConfig.useMocks || authStatus !== "authenticated" || photoPreviewUrls[photoId]) return;
+      try {
+        const preview = await photosApi.preview(photoId);
+        setPhotoPreviewUrls((prev) => ({ ...prev, [photoId]: preview.previewUrl }));
+        setDataError(null);
+      } catch (error) {
+        setDataError(errorMessage(error));
+      }
+    },
+    [authStatus, photoPreviewUrls, photosApi, runtimeConfig.useMocks]
+  );
+
+  const refreshNotifications = useCallback(async () => {
+    if (runtimeConfig.useMocks || authStatus !== "authenticated") return;
+    setNotificationState("loading");
+    try {
+      const loadedNotifications = await notificationsApi.list();
+      setNotifications(loadedNotifications);
+      setDataError(null);
+      setNotificationState("idle");
+    } catch (error) {
+      setDataError(errorMessage(error));
+      setNotificationState("error");
+    }
+  }, [authStatus, notificationsApi, runtimeConfig.useMocks]);
+
+  const refreshAuditLogs = useCallback(
+    async (query: AuditLogQuery = {}) => {
+      if (runtimeConfig.useMocks || authStatus !== "authenticated") return;
+      setAuditLogState("loading");
+      try {
+        const logs = await auditApi.list(query);
+        setAuditLogRecords(logs);
+        setDataError(null);
+        setAuditLogState("idle");
+      } catch (error) {
+        setDataError(errorMessage(error));
+        setAuditLogState("error");
+      }
+    },
+    [auditApi, authStatus, runtimeConfig.useMocks]
+  );
+
+  const refreshDirectory = useCallback(async () => {
+    if (runtimeConfig.useMocks || authStatus !== "authenticated") return;
+    setDirectoryState("loading");
+    try {
+      const [masterData, loadedUsers] = await Promise.all([
+        masterDataApi.all(),
+        usersApi.visible({ active: true })
+      ]);
+      setDirectory({ ...masterData, users: loadedUsers });
+      setDataError(null);
+      setDirectoryState("idle");
+    } catch (error) {
+      setDataError(errorMessage(error));
+      setDirectoryState("error");
+    }
+  }, [authStatus, masterDataApi, runtimeConfig.useMocks, usersApi]);
+
+  const selectItem = useCallback(
+    (itemId: string | null) => {
+      setSelectedItemId(itemId);
+      if (runtimeConfig.useMocks || authStatus !== "authenticated") return;
+      if (itemId) {
+        void refreshItemDetail(itemId);
+      } else {
+        void refreshSiteItems();
+      }
+    },
+    [authStatus, refreshItemDetail, refreshSiteItems, runtimeConfig.useMocks]
+  );
+
+  useEffect(() => {
+    if (runtimeConfig.useMocks) return;
+    let cancelled = false;
+    const token = readStoredToken();
+    if (!token) {
+      setAuthStatus("anonymous");
+      return;
+    }
+    setAuthStatus("checking");
+    authApi
+      .currentUser()
+      .then(({ user }) => {
+        if (cancelled) return;
+        setApiUser(user);
+        setAuthStatus("authenticated");
+        setAuthError(null);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        clearStoredToken();
+        setApiUser(null);
+        setAuthStatus("anonymous");
+        setAuthError(errorMessage(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authApi, runtimeConfig.useMocks]);
+
+  async function login(username: string, password: string): Promise<void> {
+    if (runtimeConfig.useMocks) {
+      setCurrentUserId(username);
+      return;
+    }
+    setAuthStatus("checking");
+    setAuthError(null);
+    try {
+      const result = await authApi.login(username, password);
+      saveStoredToken(result.accessToken);
+      setApiUser(result.user);
+      setAuthStatus("authenticated");
+      void refreshSiteItems();
+    } catch (error) {
+      clearStoredToken();
+      setApiUser(null);
+      setAuthStatus("anonymous");
+      setAuthError(errorMessage(error));
+    }
+  }
+
+  async function logout(): Promise<void> {
+    if (runtimeConfig.useMocks) {
+      setCurrentUserId(null);
+      return;
+    }
+    try {
+      if (readStoredToken()) await authApi.logout();
+    } catch {
+      // Local logout must still succeed if the backend is unavailable.
+    } finally {
+      clearStoredToken();
+      setApiUser(null);
+      setAuthStatus("anonymous");
+      setAuthError(null);
+      setItems([]);
+      setPhotos([]);
+      setPhotoPreviewUrls({});
+      setLogs([]);
+      setAllowedActionsByItem({});
+      setNotifications([]);
+      setAuditLogRecords([]);
+      setDirectory(emptyDirectory);
+      setGalleryPhotos([]);
+    }
+  }
+
+  useEffect(() => {
+    if (runtimeConfig.useMocks || authStatus !== "authenticated" || !currentUser) return;
+    void refreshSiteItems();
+    void refreshPhotos();
+    void refreshNotifications();
+    void refreshDirectory();
+  }, [authStatus, currentUser?.id, refreshDirectory, refreshNotifications, refreshPhotos, refreshSiteItems, runtimeConfig.useMocks]);
 
   function runOnce(key: string, action: () => void) {
     if (idempotencyGuard(idempotencyKeys.current, key)) action();
   }
 
-  function createItemFromForm(values: Partial<SiteItem>, options: CreateItemOptions) {
+  async function createItemFromForm(values: Partial<SiteItem>, options: CreateItemOptions) {
     if (!currentUser || !canCreateItem(currentUser)) return;
+    if (!runtimeConfig.useMocks) {
+      const input: CreateSiteItemInput = {
+        sectionId: values.sectionId || currentUser.sectionScopeIds[0],
+        type: values.type,
+        severity: values.severity,
+        title: values.title,
+        description: values.description,
+        areaId: values.areaId,
+        disciplineId: values.disciplineId,
+        locationText: values.locationText,
+        dueAt: values.dueAt,
+        photoIds: options.selectedPhotoIds ?? []
+      };
+      const key = apiIdempotencyKeys.current.get(options.requestKey, "create");
+      try {
+        const detail = await siteItemsApi.create(input, key);
+        apiIdempotencyKeys.current.clear(options.requestKey);
+        mergeItemDetail(detail);
+        setDataError(null);
+        setSelectedItemId(detail.id);
+        setActiveDraft(null);
+        setIsCreatingItem(false);
+        setMobileRoute("items");
+        void refreshSiteItems();
+      } catch (error) {
+        setDataError(errorMessage(error));
+      }
+      return;
+    }
     runOnce(options.requestKey, () => {
       const dueAt = values.dueAt || defaultDueAt();
       const sectionId = values.sectionId || currentUser.sectionScopeIds[0] || sections[0].id;
@@ -197,7 +590,7 @@ function useAppState() {
       setItems((prev) => [newItem, ...prev]);
       bindPhotosToItem(newItem, options.selectedPhotoIds || [], "discovery");
       setLogs((prev) => [createLog(newItem, "create", currentUser.id, "前端 mock 提交待审核事项", "pending_approval"), ...prev]);
-      setSelectedItemId(newItem.id);
+      selectItem(newItem.id);
       setActiveDraft(null);
       setIsCreatingItem(false);
       setMobileRoute("items");
@@ -235,8 +628,41 @@ function useAppState() {
     ]);
   }
 
-  function applyWorkflow(item: SiteItem, action: WorkflowAction, options?: { userId?: string; organizationId?: string; comment?: string }) {
+  async function applyWorkflow(item: SiteItem, action: WorkflowAction, options?: WorkflowOptions) {
     if (!currentUser) return;
+    if (!runtimeConfig.useMocks) {
+      const input: SiteItemWorkflowInput = {
+        responsibleOrgId: options?.responsibleOrgId ?? options?.organizationId,
+        responsibleUserId: options?.responsibleUserId ?? options?.userId,
+        photoIds: options?.photoIds,
+        comment: options?.comment
+      };
+      const actionId = [
+        "workflow",
+        action,
+        item.id,
+        item.status,
+        item.updatedAt,
+        input.responsibleOrgId,
+        input.responsibleUserId,
+        input.photoIds?.join(","),
+        input.comment
+      ]
+        .filter(Boolean)
+        .join(":");
+      const key = apiIdempotencyKeys.current.get(actionId, action === "comment" ? "comment" : "workflow");
+      try {
+        const detail = await siteItemsApi.workflow(item.id, action, input, key);
+        apiIdempotencyKeys.current.clear(actionId);
+        mergeItemDetail(detail);
+        setDataError(null);
+        void refreshSiteItems();
+      } catch (error) {
+        setDataError(errorMessage(error));
+        void refreshItemDetail(item.id);
+      }
+      return;
+    }
     const latestItem = items.find((candidate) => candidate.id === item.id);
     if (!latestItem || !canSeeItem(currentUser, latestItem)) return;
     if (!allowedActions(currentUser, latestItem).includes(action)) return;
@@ -311,6 +737,13 @@ function useAppState() {
           : photo
       )
     );
+    setGalleryPhotos((prev) =>
+      prev.map((photo) =>
+        selected.has(photo.id) && !photo.siteItemId && photo.uploadedBy === currentUser.id
+          ? bindPhotoToItem(photo, item, stage)
+          : photo
+      )
+    );
   }
 
   function buildPhoto(upload: UploadQueueItem, item?: SiteItem): PhotoAttachment {
@@ -335,6 +768,10 @@ function useAppState() {
 
   function addMockUpload(stage: PhotoStage = "discovery") {
     if (!currentUser) return;
+    if (!runtimeConfig.useMocks) {
+      setDataError("请通过添加照片选择本地图片上传。");
+      return;
+    }
     const newUpload: UploadQueueItem = {
       id: `upload-${Date.now()}`,
       fileName: `现场照片-${uploadQueue.length + 1}.jpg`,
@@ -345,28 +782,154 @@ function useAppState() {
     setUploadQueue((prev) => [newUpload, ...prev]);
   }
 
-  function completeUpload(upload: UploadQueueItem) {
+  async function uploadPhotoFiles(fileList: FileList | File[], stage: PhotoStage = "discovery") {
+    if (!currentUser) return;
+    const files = Array.from(fileList);
+    if (runtimeConfig.useMocks) {
+      files.forEach(() => addMockUpload(stage));
+      return;
+    }
+    const uploads = files.map((file) => ({
+      id: uniqueId("upload"),
+      fileName: file.name || "现场照片.jpg",
+      stage,
+      state: "pending" as const,
+      uploadedBy: currentUser.id,
+      file,
+      mimeType: file.type || "image/jpeg",
+      sizeBytes: file.size,
+      completeRequestKey: uniqueId("photo-complete")
+    }));
+    setUploadQueue((prev) => [...uploads, ...prev]);
+    for (const upload of uploads) {
+      void completeUpload(upload);
+    }
+  }
+
+  async function uploadObjectAndComplete(upload: UploadQueueItem): Promise<PhotoAttachment> {
+    if (!upload.file && !upload.objectKey) throw new Error("缺少可上传的照片文件");
+    const mimeType = upload.mimeType || upload.file?.type || "image/jpeg";
+    const sizeBytes = upload.sizeBytes ?? upload.file?.size ?? 0;
+    let objectKey = upload.objectKey;
+    if (!objectKey) {
+      if (!upload.file) throw new Error("缺少可上传的照片文件");
+      const presign = await photosApi.presign({ fileName: upload.fileName, mimeType, sizeBytes });
+      objectKey = presign.objectKey;
+      setUploadQueue((prev) => prev.map((item) => (item.id === upload.id ? { ...item, objectKey } : item)));
+      const response = await fetch(presign.uploadUrl, {
+        method: "PUT",
+        body: upload.file,
+        headers: { "Content-Type": mimeType }
+      });
+      if (!response.ok) throw new Error("对象存储上传失败");
+    }
+    const completeInput: PhotoCompleteInput = { objectKey, fileName: upload.fileName, mimeType, sizeBytes };
+    const key = apiIdempotencyKeys.current.get(upload.completeRequestKey || upload.id, "photo-complete");
+    return photosApi.complete(completeInput, key);
+  }
+
+  async function completeUpload(upload: UploadQueueItem) {
     if (!currentUser) {
       setUploadQueue((prev) => prev.map((item) => (item.id === upload.id ? { ...item, state: "failed" } : item)));
       return;
     }
+    if (!runtimeConfig.useMocks) {
+      setUploadQueue((prev) => prev.map((item) => (item.id === upload.id ? { ...item, state: "uploading" } : item)));
+      try {
+        const photo = await uploadObjectAndComplete(upload);
+        apiIdempotencyKeys.current.clear(upload.completeRequestKey || upload.id);
+        setGalleryPhotos((prev) => [photo, ...prev.filter((candidate) => candidate.id !== photo.id)]);
+        setUploadQueue((prev) => prev.map((item) => (item.id === upload.id ? { ...item, state: "complete" } : item)));
+        setDataError(null);
+        void refreshPhotos();
+      } catch (error) {
+        setDataError(errorMessage(error));
+        setUploadQueue((prev) => prev.map((item) => (item.id === upload.id ? { ...item, state: "failed" } : item)));
+      }
+      return;
+    }
     const item = upload.siteItemId ? items.find((candidate) => candidate.id === upload.siteItemId) : undefined;
     runOnce(`photo-complete-${upload.id}`, () => {
-      setPhotos((prev) => [buildPhoto(upload, item), ...prev]);
+      const photo = buildPhoto(upload, item);
+      setPhotos((prev) => [photo, ...prev]);
+      setGalleryPhotos((prev) => [photo, ...prev]);
       setUploadQueue((prev) => prev.map((queueItem) => (queueItem.id === upload.id ? { ...queueItem, state: "complete" } : queueItem)));
     });
+  }
+
+  async function deletePhoto(photo: PhotoAttachment) {
+    if (!currentUser) return;
+    if (runtimeConfig.useMocks) {
+      setPhotos((prev) => prev.filter((candidate) => candidate.id !== photo.id));
+      setGalleryPhotos((prev) => prev.filter((candidate) => candidate.id !== photo.id));
+      return;
+    }
+    const actionId = `delete-photo:${photo.id}`;
+    const key = apiIdempotencyKeys.current.get(actionId, "delete");
+    try {
+      await photosApi.delete(photo.id, key);
+      apiIdempotencyKeys.current.clear(actionId);
+      setGalleryPhotos((prev) => prev.filter((candidate) => candidate.id !== photo.id));
+      setDataError(null);
+      void refreshPhotos();
+    } catch (error) {
+      setDataError(errorMessage(error));
+    }
+  }
+
+  async function markNotificationRead(notification: Notification) {
+    if (runtimeConfig.useMocks) {
+      setNotifications((prev) => prev.map((item) => (item.id === notification.id ? { ...item, readAt: new Date().toISOString() } : item)));
+      return;
+    }
+    try {
+      const updated = await notificationsApi.markRead(notification.id);
+      setNotifications((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      setDataError(null);
+    } catch (error) {
+      setDataError(errorMessage(error));
+    }
+  }
+
+  async function markAllNotificationsRead() {
+    if (runtimeConfig.useMocks) {
+      setNotifications((prev) => prev.map((item) => ({ ...item, readAt: item.readAt ?? new Date().toISOString() })));
+      return;
+    }
+    try {
+      await notificationsApi.markAllRead();
+      await refreshNotifications();
+      setDataError(null);
+    } catch (error) {
+      setDataError(errorMessage(error));
+    }
   }
 
   return {
     currentUser,
     currentUserId,
-    setCurrentUserId,
+    setCurrentUserId: (id: string | null) => {
+      if (runtimeConfig.useMocks) {
+        setCurrentUserId(id);
+      } else if (id === null) {
+        void logout();
+      }
+    },
+    runtimeConfig,
+    authStatus,
+    authError,
+    login,
+    logout,
     items,
     setItems,
     photos,
+    galleryPhotos,
+    photoPreviewUrls,
     logs,
     notifications,
     setNotifications,
+    auditLogRecords,
+    directory,
     drafts,
     setDrafts,
     activeDraft,
@@ -374,7 +937,22 @@ function useAppState() {
     uploadQueue,
     setUploadQueue,
     selectedItemId,
-    setSelectedItemId,
+    setSelectedItemId: selectItem,
+    refreshSiteItems,
+    refreshItemDetail,
+    refreshPhotos,
+    loadPhotoPreview,
+    refreshNotifications,
+    refreshAuditLogs,
+    refreshDirectory,
+    itemListState,
+    itemDetailState,
+    photoListState,
+    notificationState,
+    auditLogState,
+    directoryState,
+    dataError,
+    allowedActionsByItem,
     isCreatingItem,
     setIsCreatingItem,
     mobileRoute,
@@ -390,44 +968,82 @@ function useAppState() {
     applyWorkflow,
     bindPhotosToItem,
     addMockUpload,
-    completeUpload
+    uploadPhotoFiles,
+    completeUpload,
+    deletePhoto,
+    markNotificationRead,
+    markAllNotificationsRead
   };
 }
 
 export function App() {
   const state = useAppState();
-  if (!state.currentUser) return <LoginPage onLogin={state.setCurrentUserId} />;
+  if (state.authStatus === "checking") return <AuthLoadingPage config={state.runtimeConfig} />;
+  if (!state.currentUser) return <LoginPage state={state} />;
   return <Shell state={state} user={state.currentUser} />;
 }
 
 type AppState = ReturnType<typeof useAppState>;
 
-function LoginPage({ onLogin }: { onLogin: (id: string) => void }) {
+function AuthLoadingPage({ config }: { config: FrontendRuntimeConfig }) {
+  return (
+    <main className="login-page">
+      <section className="login-panel">
+        <span className="product-mark">POWER SITE</span>
+        <h1>正在恢复登录</h1>
+        <p>{config.useMocks ? "正在进入原型模式。" : `正在连接 ${config.apiBaseUrl}`}</p>
+      </section>
+    </main>
+  );
+}
+
+function LoginPage({ state }: { state: AppState }) {
   const [selected, setSelected] = useState(users[1].id);
+  const [username, setUsername] = useState("wang.supervisor");
+  const [password, setPassword] = useState("password123");
+  const isMockMode = state.runtimeConfig.useMocks;
   return (
     <main className="login-page">
       <section className="login-panel">
         <div>
           <span className="product-mark">POWER SITE</span>
           <h1>发电站现场管理</h1>
-          <p>尾工与缺陷闭环、现场照片和整改看板的前端原型。</p>
+          <p>{isMockMode ? "尾工与缺陷闭环、现场照片和整改看板的前端原型。" : "连接现场管理 API，进入真实数据工作台。"}</p>
         </div>
-        <Field label="账号">
-          <TextInput value={getUser(selected)?.username || ""} readOnly />
-        </Field>
-        <Field label="密码">
-          <TextInput value="mock-password" type="password" readOnly />
-        </Field>
-        <Field label="Mock 角色">
-          <Select value={selected} onChange={(event) => setSelected(event.target.value)}>
-            {users.map((user) => (
-              <option key={user.id} value={user.id}>
-                {roleLabel(user.role)} - {user.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Button onClick={() => onLogin(selected)}>登录原型</Button>
+        {isMockMode ? (
+          <>
+            <Field label="账号">
+              <TextInput value={getUser(selected)?.username || ""} readOnly />
+            </Field>
+            <Field label="密码">
+              <TextInput value="mock-password" type="password" readOnly />
+            </Field>
+            <Field label="Mock 角色">
+              <Select value={selected} onChange={(event) => setSelected(event.target.value)}>
+                {users.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {roleLabel(user.role)} - {user.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Button onClick={() => state.login(selected, "mock-password")}>登录原型</Button>
+          </>
+        ) : (
+          <>
+            <Field label="账号">
+              <TextInput value={username} onChange={(event) => setUsername(event.target.value)} placeholder="用户名或手机号" />
+            </Field>
+            <Field label="密码">
+              <TextInput value={password} onChange={(event) => setPassword(event.target.value)} type="password" />
+            </Field>
+            {state.authError ? <p className="form-error">{state.authError}</p> : null}
+            <Button disabled={state.authStatus === "checking" || !username || !password} onClick={() => void state.login(username, password)}>
+              登录
+            </Button>
+            <p className="muted">API：{state.runtimeConfig.apiBaseUrl}</p>
+          </>
+        )}
       </section>
     </main>
   );
@@ -552,15 +1168,15 @@ function renderDesktopRoute(state: AppState, user: User) {
   if (route === "items") return <DesktopItems state={state} user={user} />;
   if (route === "photo") return <PhotoPage state={state} />;
   if (route === "drawings") return <DrawingAdmin />;
-  if (route === "master") return <MasterDataPage />;
-  if (route === "users") return <UsersPage />;
+  if (route === "master") return <MasterDataPage state={state} />;
+  if (route === "users") return <UsersPage state={state} />;
   if (route === "exports") return <ExportsPage />;
   if (route === "profile") return <ProfilePage state={state} user={user} />;
-  return <AuditPage />;
+  return <AuditPage state={state} />;
 }
 
 function TodoPage({ state, user }: { state: AppState; user: User }) {
-  const items = visibleItems(user, state.items);
+  const items = scopedItems(state, user);
   const todoItems = items.filter((item) => item.status !== "closed" && item.status !== "voided");
   const summary = summarize(items);
   return (
@@ -604,7 +1220,10 @@ function ItemListPage({ state, user }: { state: AppState; user: User }) {
     timing: "all"
   });
   const [query, setQuery] = useState("");
-  const base = defaultListItems(user, state.items);
+  useEffect(() => {
+    void state.refreshSiteItems(filters, query);
+  }, [filters, query, state.refreshSiteItems]);
+  const base = defaultScopedListItems(state, user);
   const filtered = base.filter((item) => {
     const text = [
       item.itemNo,
@@ -614,7 +1233,7 @@ function ItemListPage({ state, user }: { state: AppState; user: User }) {
       getDiscipline(item.disciplineId)?.name,
       getOrganization(item.responsibleOrgId)?.name
     ].join("");
-    return matchesItemFilter(filters, item, user) && text.includes(query);
+    return matchesItemFilter(filters, item, user, state) && (state.runtimeConfig.useMocks ? text.includes(query) : true);
   });
   function updateFilter<K extends keyof ItemFilterValues>(key: K, value: ItemFilterValues[K]) {
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -640,6 +1259,8 @@ function ItemListPage({ state, user }: { state: AppState; user: User }) {
           <option value="punch">尾工</option>
         </Select>
       </div>
+      {state.itemListState === "loading" ? <p className="muted">正在刷新事项列表...</p> : null}
+      {state.dataError ? <p className="error-text">{state.dataError}</p> : null}
       {filtered.map((item) => (
         <ItemCard
           key={item.id}
@@ -653,9 +1274,16 @@ function ItemListPage({ state, user }: { state: AppState; user: User }) {
   );
 }
 
-function matchesItemFilter(filters: ItemFilterValues, item: SiteItem, user: User) {
+function matchesItemFilter(filters: ItemFilterValues, item: SiteItem, user: User, state?: AppState) {
   if (filters.status === "open" && ["closed", "voided"].includes(item.status)) return false;
-  if (filters.status === "mine" && !allowedActions(user, item).some((action) => action !== "comment")) return false;
+  if (filters.status === "mine") {
+    if (state && !state.runtimeConfig.useMocks) {
+      const detailActions = state.allowedActionsByItem[item.id];
+      if (detailActions) return detailActions.some((action) => action !== "comment");
+      return false;
+    }
+    if (!allowedActions(user, item).some((action) => action !== "comment")) return false;
+  }
   if (!["open", "mine"].includes(filters.status) && item.status !== filters.status) return false;
   if (filters.type !== "all" && item.type !== filters.type) return false;
   if (filters.severity !== "all" && item.severity !== filters.severity) return false;
@@ -695,9 +1323,13 @@ function ItemCard({ item, photoCount, onClick }: { item: SiteItem; photoCount: n
 function CreateItemPage({ state, onBack }: { state: AppState; onBack: () => void }) {
   const currentUser = state.currentUser;
   const draftValues = state.activeDraft?.values;
-  const scopedSections = sections.filter((section) => currentUser?.sectionScopeIds.includes(section.id));
-  const initialSectionId = draftValues?.sectionId || scopedSections[0]?.id || sections[0].id;
-  const initialOwnerCandidates = ownerCandidatesForSection(initialSectionId);
+  const directory = state.directory;
+  const scopedSections =
+    currentUser?.role === "admin"
+      ? directory.sections
+      : directory.sections.filter((section) => currentUser?.sectionScopeIds.includes(section.id));
+  const initialSectionId = draftValues?.sectionId || scopedSections[0]?.id || directory.sections[0]?.id;
+  const initialOwnerCandidates = ownerCandidatesForDirectory(directory, initialSectionId);
   const defaultOwnerId =
     currentUser && ["admin", "supervisor"].includes(currentUser.role) && currentUser.sectionScopeIds.includes(initialSectionId)
       ? currentUser.id
@@ -710,8 +1342,8 @@ function CreateItemPage({ state, onBack }: { state: AppState; onBack: () => void
     type: "defect",
     severity: "important",
     sectionId: initialSectionId,
-    areaId: areas[0].id,
-    disciplineId: disciplines[0].id,
+    areaId: directory.areas[0]?.id,
+    disciplineId: directory.disciplines[0]?.id,
     ownerUserId: defaultOwnerId,
     title: "",
     description: "",
@@ -719,20 +1351,25 @@ function CreateItemPage({ state, onBack }: { state: AppState; onBack: () => void
     dueAt: defaultDueAt(),
     ...draftValues
   });
-  const ownerCandidates = ownerCandidatesForSection(values.sectionId);
-  const availablePhotos = state.photos
+  const ownerCandidates = ownerCandidatesForDirectory(directory, values.sectionId);
+  const availablePhotos = state.galleryPhotos
     .filter((photo) => !photo.siteItemId && photo.uploadedBy === currentUser?.id)
     .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
   const selectedPhotos = availablePhotos.filter((photo) => selectedPhotoIds.includes(photo.id));
+  const canSubmit = Boolean(values.sectionId && values.areaId && values.disciplineId && (values.title || "").trim());
   function changeArea(areaId: string) {
     setValues({ ...values, areaId });
   }
   function togglePhoto(photoId: string) {
     setSelectedPhotoIds((prev) => (prev.includes(photoId) ? prev.filter((id) => id !== photoId) : [...prev, photoId]));
   }
+  useEffect(() => {
+    if (isPickingPhotos) void state.refreshPhotos({ unboundOnly: true });
+  }, [isPickingPhotos, state.refreshPhotos]);
   if (isPickingPhotos) {
     return (
       <PhotoPickerPage
+        state={state}
         title="选择发现照片"
         photos={availablePhotos}
         selectedPhotoIds={selectedPhotoIds}
@@ -771,7 +1408,7 @@ function CreateItemPage({ state, onBack }: { state: AppState; onBack: () => void
               value={values.sectionId}
               onChange={(event) => {
                 const sectionId = event.target.value;
-                const candidates = ownerCandidatesForSection(sectionId);
+                const candidates = ownerCandidatesForDirectory(directory, sectionId);
                 const ownerStillValid = candidates.some((candidate) => candidate.id === values.ownerUserId);
                 setValues({ ...values, sectionId, ownerUserId: ownerStillValid ? values.ownerUserId : candidates[0]?.id });
               }}
@@ -781,19 +1418,21 @@ function CreateItemPage({ state, onBack }: { state: AppState; onBack: () => void
           </Field>
           <Field label="区域">
             <Select value={values.areaId} onChange={(event) => changeArea(event.target.value)}>
-              {areas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
+              {directory.areas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
             </Select>
           </Field>
           <Field label="专业">
             <Select value={values.disciplineId} onChange={(event) => setValues({ ...values, disciplineId: event.target.value })}>
-              {disciplines.map((discipline) => <option key={discipline.id} value={discipline.id}>{discipline.name}</option>)}
+              {directory.disciplines.map((discipline) => <option key={discipline.id} value={discipline.id}>{discipline.name}</option>)}
             </Select>
           </Field>
-          <Field label="责任工程师">
-            <Select value={values.ownerUserId} onChange={(event) => setValues({ ...values, ownerUserId: event.target.value })}>
-              {ownerCandidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
-            </Select>
-          </Field>
+          {state.runtimeConfig.useMocks ? (
+            <Field label="责任工程师">
+              <Select value={values.ownerUserId} onChange={(event) => setValues({ ...values, ownerUserId: event.target.value })}>
+                {ownerCandidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
+              </Select>
+            </Field>
+          ) : null}
           <Field label="位置描述">
             <TextInput value={values.locationText || ""} onChange={(event) => setValues({ ...values, locationText: event.target.value })} placeholder="轴线、楼层、设备基础或道路桩号" />
           </Field>
@@ -842,16 +1481,18 @@ function CreateItemPage({ state, onBack }: { state: AppState; onBack: () => void
           </div>
         ) : null}
       </Card>
+      {state.dataError ? <p className="error-text">{state.dataError}</p> : null}
       <div className="action-row sticky-actions">
         <Button variant="secondary" onClick={() => state.saveDraft(values, selectedPhotoIds)}>保存草稿</Button>
-        <Button onClick={() => state.createItemFromForm(values, { requestKey, selectedPhotoIds })}>提交审核</Button>
+        <Button disabled={!canSubmit} onClick={() => state.createItemFromForm(values, { requestKey, selectedPhotoIds })}>提交审核</Button>
       </div>
-      {previewPhoto ? <PhotoPreviewModal photo={previewPhoto} onClose={() => setPreviewPhoto(null)} /> : null}
+      {previewPhoto ? <PhotoPreviewModal state={state} photo={previewPhoto} onClose={() => setPreviewPhoto(null)} /> : null}
     </div>
   );
 }
 
 function PhotoPickerPage({
+  state,
   title,
   photos,
   selectedPhotoIds,
@@ -859,6 +1500,7 @@ function PhotoPickerPage({
   onCancel,
   onConfirm
 }: {
+  state: AppState;
   title: string;
   photos: PhotoAttachment[];
   selectedPhotoIds: string[];
@@ -917,40 +1559,67 @@ function PhotoPickerPage({
         <Button variant="secondary" onClick={onCancel}>取消</Button>
         <Button onClick={onConfirm}>确认选择 {selectedPhotoIds.length} 张</Button>
       </div>
-      {previewPhoto ? <PhotoPreviewModal photo={previewPhoto} onClose={() => setPreviewPhoto(null)} /> : null}
+      {previewPhoto ? <PhotoPreviewModal state={state} photo={previewPhoto} onClose={() => setPreviewPhoto(null)} /> : null}
     </div>
   );
 }
 
 function ItemDetailPage({ state, user, item }: { state: AppState; user: User; item: SiteItem }) {
-  const actions = allowedActions(user, item);
+  const actions = allowedItemActions(state, user, item);
   const canComment = actions.includes("comment");
   const workflowActions = actions.filter((action) => action !== "comment");
   const [selectedReviewPhotoIds, setSelectedReviewPhotoIds] = useState<string[]>([]);
   const [isPickingReviewPhotos, setIsPickingReviewPhotos] = useState(false);
+  const [selectedClosePhotoIds, setSelectedClosePhotoIds] = useState<string[]>([]);
+  const [isPickingClosePhotos, setIsPickingClosePhotos] = useState(false);
   const [isCommenting, setIsCommenting] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [previewPhoto, setPreviewPhoto] = useState<PhotoAttachment | null>(null);
-  const availableReviewPhotos = state.photos
+  const availableReviewPhotos = state.galleryPhotos
     .filter((photo) => !photo.siteItemId && photo.uploadedBy === user.id)
     .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
   const selectedReviewPhotos = availableReviewPhotos.filter((photo) => selectedReviewPhotoIds.includes(photo.id));
+  const selectedClosePhotos = availableReviewPhotos.filter((photo) => selectedClosePhotoIds.includes(photo.id));
   const photosForItem = itemPhotos(item.id, state.photos);
   const photoStages: PhotoStage[] = ["discovery", "rectification", "review"];
   const photoGroups = photoStages
     .map((stage) => ({ stage, photos: photosForItem.filter((photo) => photo.stage === stage) }))
     .filter((group) => group.photos.length);
+  useEffect(() => {
+    void state.refreshItemDetail(item.id);
+  }, [item.id, state.refreshItemDetail]);
   function toggleReviewPhoto(photoId: string) {
     setSelectedReviewPhotoIds((prev) => (prev.includes(photoId) ? prev.filter((id) => id !== photoId) : [...prev, photoId]));
   }
+  function toggleClosePhoto(photoId: string) {
+    setSelectedClosePhotoIds((prev) => (prev.includes(photoId) ? prev.filter((id) => id !== photoId) : [...prev, photoId]));
+  }
+  useEffect(() => {
+    if (isPickingReviewPhotos || isPickingClosePhotos) void state.refreshPhotos({ unboundOnly: true });
+  }, [isPickingClosePhotos, isPickingReviewPhotos, state.refreshPhotos]);
   function submitReviewWithPhotos() {
-    state.bindPhotosToItem(item, selectedReviewPhotoIds, "rectification");
-    state.applyWorkflow(item, "submit_review", {
+    if (state.runtimeConfig.useMocks) {
+      state.bindPhotosToItem(item, selectedReviewPhotoIds, "rectification");
+    }
+    void state.applyWorkflow(item, "submit_review", {
+      photoIds: selectedReviewPhotoIds,
       comment: selectedReviewPhotoIds.length
         ? `整改人提交复验，已绑定${selectedReviewPhotoIds.length}张整改照片`
         : "整改人提交复验"
     });
     setSelectedReviewPhotoIds([]);
+  }
+  function closeWithPhotos() {
+    if (state.runtimeConfig.useMocks) {
+      state.bindPhotosToItem(item, selectedClosePhotoIds, "review");
+    }
+    void state.applyWorkflow(item, "close", {
+      photoIds: selectedClosePhotoIds,
+      comment: selectedClosePhotoIds.length
+        ? `责任工程师关闭事项，已绑定${selectedClosePhotoIds.length}张复验照片`
+        : "责任工程师关闭事项"
+    });
+    setSelectedClosePhotoIds([]);
   }
   function submitComment() {
     const trimmed = commentText.trim();
@@ -962,12 +1631,32 @@ function ItemDetailPage({ state, user, item }: { state: AppState; user: User; it
   if (isPickingReviewPhotos) {
     return (
       <PhotoPickerPage
+        state={state}
         title="选择整改照片"
         photos={availableReviewPhotos}
         selectedPhotoIds={selectedReviewPhotoIds}
         onToggle={toggleReviewPhoto}
         onCancel={() => setIsPickingReviewPhotos(false)}
-        onConfirm={() => setIsPickingReviewPhotos(false)}
+        onConfirm={() => {
+          setIsPickingReviewPhotos(false);
+          void state.refreshItemDetail(item.id);
+        }}
+      />
+    );
+  }
+  if (isPickingClosePhotos) {
+    return (
+      <PhotoPickerPage
+        state={state}
+        title="选择复验照片"
+        photos={availableReviewPhotos}
+        selectedPhotoIds={selectedClosePhotoIds}
+        onToggle={toggleClosePhoto}
+        onCancel={() => setIsPickingClosePhotos(false)}
+        onConfirm={() => {
+          setIsPickingClosePhotos(false);
+          void state.refreshItemDetail(item.id);
+        }}
       />
     );
   }
@@ -1000,6 +1689,8 @@ function ItemDetailPage({ state, user, item }: { state: AppState; user: User; it
           </Card>
           <Card className="photo-evidence-card">
             <h3>照片证据</h3>
+            {state.itemDetailState === "loading" ? <p className="muted">正在刷新详情...</p> : null}
+            {state.itemDetailState === "error" && state.dataError ? <p className="error-text">{state.dataError}</p> : null}
             <div className="photo-evidence-groups">
               {photoGroups.map((group) => (
                 <div key={group.stage} className="photo-stage-group">
@@ -1101,6 +1792,33 @@ function ItemDetailPage({ state, user, item }: { state: AppState; user: User; it
                     )}
                     <Button disabled={!selectedReviewPhotoIds.length} onClick={submitReviewWithPhotos}>提交复验</Button>
                   </div>
+                ) : action === "close" ? (
+                  <div key={action} className="workflow-photo-action">
+                    <div className="photo-picker-head">
+                      <p className="muted">可从我的现场图库选择复验照片，关闭时一并归档。</p>
+                      <Button variant="secondary" disabled={!availableReviewPhotos.length} onClick={() => setIsPickingClosePhotos(true)}>
+                        选择复验照片
+                      </Button>
+                    </div>
+                    {selectedClosePhotos.length ? (
+                      <div className="photo-grid compact-photo-grid">
+                        {selectedClosePhotos.map((photo) => (
+                          <div key={photo.id} className="photo-tile selectable-photo selected">
+                            <div className="photo-thumb">复验</div>
+                            <strong>{photo.fileName}</strong>
+                            <span>将作为复验照片归档</span>
+                            <div className="action-row">
+                              <Button variant="secondary" onClick={() => setPreviewPhoto(photo)}>预览</Button>
+                              <Button variant="ghost" onClick={() => toggleClosePhoto(photo.id)}>移除</Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="muted">未选择复验照片时仍可关闭，系统会保留流程日志作为签认依据。</p>
+                    )}
+                    <Button onClick={closeWithPhotos}>关闭事项</Button>
+                  </div>
                 ) : (
                   <Button key={action} variant={action === "void" ? "danger" : "secondary"} onClick={() => state.applyWorkflow(item, action)}>
                     {actionLabel(action)}
@@ -1123,15 +1841,18 @@ function ItemDetailPage({ state, user, item }: { state: AppState; user: User; it
           </Card>
         </aside>
       </div>
-      {previewPhoto ? <PhotoPreviewModal photo={previewPhoto} item={item} onClose={() => setPreviewPhoto(null)} /> : null}
+      {previewPhoto ? <PhotoPreviewModal state={state} photo={previewPhoto} item={item} onClose={() => setPreviewPhoto(null)} /> : null}
     </div>
   );
 }
 
 function DispatchItem({ item, state }: { item: SiteItem; state: AppState }) {
-  const contractorOrgs = organizations.filter((organization) => organization.type === "contractor" && organization.isActive);
+  const contractorOrgs = state.directory.organizations.filter((organization) => organization.type === "contractor" && organization.isActive);
   const [organizationId, setOrganizationId] = useState(item.responsibleOrgId || contractorOrgs[0]?.id || "");
-  const organizationName = getOrganization(organizationId)?.name || "责任单位";
+  const organizationName = directoryItem(state.directory.organizations, organizationId)?.name || "责任单位";
+  useEffect(() => {
+    if (!organizationId && contractorOrgs[0]?.id) setOrganizationId(contractorOrgs[0].id);
+  }, [contractorOrgs, organizationId]);
   return (
     <div className="inline-form">
       <Select value={organizationId} onChange={(event) => setOrganizationId(event.target.value)}>
@@ -1149,8 +1870,11 @@ function DispatchItem({ item, state }: { item: SiteItem; state: AppState }) {
 }
 
 function AssignRectifier({ item, state }: { item: SiteItem; state: AppState }) {
-  const candidates = activeRectifiersForOrg(item.responsibleOrgId || "", item.sectionId);
+  const candidates = activeRectifiersForDirectory(state.directory, item.responsibleOrgId || "", item.sectionId);
   const [userId, setUserId] = useState(candidates[0]?.id || "");
+  useEffect(() => {
+    if (!userId && candidates[0]?.id) setUserId(candidates[0].id);
+  }, [candidates, userId]);
   return (
     <div className="inline-form">
       <Select value={userId} onChange={(event) => setUserId(event.target.value)}>
@@ -1170,13 +1894,46 @@ function AssignRectifier({ item, state }: { item: SiteItem; state: AppState }) {
 function PhotoPage({ state }: { state: AppState }) {
   const currentUserId = state.currentUser?.id;
   const [previewPhoto, setPreviewPhoto] = useState<PhotoAttachment | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    void state.refreshPhotos();
+  }, [state.refreshPhotos]);
   const visibleUploads = state.uploadQueue.filter((upload) => upload.state !== "complete" && upload.uploadedBy === currentUserId);
-  const sortedPhotos = state.photos
+  const sortedPhotos = state.galleryPhotos
     .filter((photo) => photo.uploadedBy === currentUserId)
     .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
   return (
     <div className="stack">
-      <PageHeader title="我的现场图库" meta="当前账号独立管理，后续在事项表单中绑定" action={<Button onClick={() => state.addMockUpload()}>添加照片</Button>} />
+      <PageHeader
+        title="我的现场图库"
+        meta="当前账号独立管理，后续在事项表单中绑定"
+        action={(
+          <>
+            <input
+              ref={fileInputRef}
+              className="visually-hidden"
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={(event) => {
+                if (event.target.files?.length) void state.uploadPhotoFiles(event.target.files);
+                event.target.value = "";
+              }}
+            />
+            <Button onClick={() => {
+              if (state.runtimeConfig.useMocks) {
+                state.addMockUpload();
+              } else {
+                fileInputRef.current?.click();
+              }
+            }}>
+              添加照片
+            </Button>
+          </>
+        )}
+      />
+      {state.photoListState === "loading" ? <p className="muted">正在刷新照片列表...</p> : null}
+      {state.photoListState === "error" && state.dataError ? <p className="error-text">{state.dataError}</p> : null}
       <Card>
         <h3>上传队列</h3>
         <p className="muted">现场先拍照入库；绑定事项在新建、整改或复验表单中完成。</p>
@@ -1206,7 +1963,10 @@ function PhotoPage({ state }: { state: AppState }) {
                 <strong>{photo.fileName}</strong>
                 <span>{item ? `${item.itemNo} · ${photoStageLabel(photo.stage)}` : "未绑定"}</span>
                 <span>{formatDate(photo.uploadedAt)} · {getUser(photo.uploadedBy)?.name || "未知上传人"}</span>
-                <Button variant="secondary" onClick={() => setPreviewPhoto(photo)}>预览</Button>
+                <div className="action-row">
+                  <Button variant="secondary" onClick={() => setPreviewPhoto(photo)}>预览</Button>
+                  {!photo.siteItemId ? <Button variant="ghost" onClick={() => void state.deletePhoto(photo)}>删除</Button> : null}
+                </div>
               </div>
             );
           })}
@@ -1215,6 +1975,7 @@ function PhotoPage({ state }: { state: AppState }) {
       </Card>
       {previewPhoto ? (
         <PhotoPreviewModal
+          state={state}
           photo={previewPhoto}
           item={previewPhoto.siteItemId ? state.items.find((item) => item.id === previewPhoto.siteItemId) : undefined}
           onClose={() => setPreviewPhoto(null)}
@@ -1226,7 +1987,7 @@ function PhotoPage({ state }: { state: AppState }) {
 
 function MobileDashboard({ state, user }: { state: AppState; user: User }) {
   const [sectionId, setSectionId] = useState("all");
-  const source = visibleItems(user, state.items).filter((item) => sectionId === "all" || item.sectionId === sectionId);
+  const source = scopedItems(state, user).filter((item) => sectionId === "all" || item.sectionId === sectionId);
   const summary = summarize(source);
   const byOrg = countBy(source.filter(isOverdue), (item) => getOrganization(item.responsibleOrgId)?.name);
   return (
@@ -1255,7 +2016,7 @@ function ProfilePage({ state, user }: { state: AppState; user: User }) {
   const userDrafts = state.drafts.filter((draft) => draft.createdBy === user.id);
   return (
     <div className="stack">
-      <PageHeader title="我的" meta={roleLabel(user.role)} action={<Button variant="ghost" onClick={() => state.setCurrentUserId(null)}>退出</Button>} />
+      <PageHeader title="我的" meta={roleLabel(user.role)} action={<Button variant="ghost" onClick={() => void state.logout()}>退出</Button>} />
       <Card>
         <dl className="detail-grid">
           <div><dt>姓名</dt><dd>{user.name}</dd></div>
@@ -1281,29 +2042,45 @@ function ProfilePage({ state, user }: { state: AppState; user: User }) {
 
 function NotificationPanel({ state, user }: { state: AppState; user: User }) {
   const notices = state.notifications.filter((notice) => notice.recipientId === user.id);
+  useEffect(() => {
+    void state.refreshNotifications();
+  }, [state.refreshNotifications]);
   return (
     <div className="modal-backdrop">
       <section className="modal">
-        <PageHeader title="通知" action={<Button variant="ghost" onClick={() => state.setShowNotifications(false)}>关闭</Button>} />
+        <PageHeader
+          title="通知"
+          action={(
+            <div className="action-row wrap">
+              <Button variant="secondary" onClick={() => void state.markAllNotificationsRead()}>全部已读</Button>
+              <Button variant="ghost" onClick={() => state.setShowNotifications(false)}>关闭</Button>
+            </div>
+          )}
+        />
+        {state.notificationState === "loading" ? <p className="muted">正在刷新通知...</p> : null}
+        {state.notificationState === "error" && state.dataError ? <p className="error-text">{state.dataError}</p> : null}
         {notices.map((notice) => (
           <button
             key={notice.id}
             className={`notice ${notice.readAt ? "" : "unread"}`}
-            onClick={() => state.setNotifications((prev) => prev.map((item) => (item.id === notice.id ? { ...item, readAt: new Date().toISOString() } : item)))}
+            onClick={() => void state.markNotificationRead(notice)}
           >
             <strong>{notice.title}</strong>
             <span>{notice.content}</span>
             <small>{formatDate(notice.createdAt)}</small>
           </button>
         ))}
+        {!notices.length ? <EmptyState title="暂无通知" description="新的派发、复验和催办消息会出现在这里。" /> : null}
       </section>
     </div>
   );
 }
 
 function DesktopTodo({ state, user }: { state: AppState; user: User }) {
-  const visible = visibleItems(user, state.items);
-  const actionable = visible.filter((item) => allowedActions(user, item).some((action) => action !== "comment"));
+  const visible = scopedItems(state, user);
+  const actionable = state.runtimeConfig.useMocks
+    ? visible.filter((item) => allowedActions(user, item).some((action) => action !== "comment"))
+    : visible.filter((item) => !["closed", "voided"].includes(item.status));
   const overdue = actionable.filter(isOverdue);
   const pendingReview = actionable.filter((item) => item.status === "pending_acceptance");
   return (
@@ -1327,7 +2104,7 @@ function DesktopTodo({ state, user }: { state: AppState; user: User }) {
 
 function DesktopDashboard({ state, user }: { state: AppState; user: User }) {
   const [sectionId, setSectionId] = useState("all");
-  const items = visibleItems(user, state.items).filter((item) => sectionId === "all" || item.sectionId === sectionId);
+  const items = scopedItems(state, user).filter((item) => sectionId === "all" || item.sectionId === sectionId);
   const summary = summarize(items);
   const byArea = countBy(items, (item) => getArea(item.areaId)?.name);
   const byOrg = countBy(items.filter(isOverdue), (item) => getOrganization(item.responsibleOrgId)?.name);
@@ -1366,7 +2143,10 @@ function DesktopItems({ state, user }: { state: AppState; user: User }) {
   });
   const [query, setQuery] = useState("");
   const [openFilter, setOpenFilter] = useState<keyof ItemFilterValues | null>(null);
-  const items = visibleItems(user, state.items).filter((item) => {
+  useEffect(() => {
+    void state.refreshSiteItems(filters, query);
+  }, [filters, query, state.refreshSiteItems]);
+  const items = scopedItems(state, user).filter((item) => {
     const text = [
       item.itemNo,
       item.title,
@@ -1376,7 +2156,7 @@ function DesktopItems({ state, user }: { state: AppState; user: User }) {
       getOrganization(item.responsibleOrgId)?.name,
       getUser(item.responsibleUserId)?.name
     ].join("");
-    return matchesItemFilter(filters, item, user) && text.includes(query);
+    return matchesItemFilter(filters, item, user, state) && (state.runtimeConfig.useMocks ? text.includes(query) : true);
   });
   function updateFilter<K extends keyof ItemFilterValues>(key: K, value: ItemFilterValues[K]) {
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -1525,6 +2305,8 @@ function DesktopItems({ state, user }: { state: AppState; user: User }) {
           }}
         />
       </div>
+      {state.itemListState === "loading" ? <p className="muted">正在刷新事项列表...</p> : null}
+      {state.dataError ? <p className="error-text">{state.dataError}</p> : null}
       <SiteItemTable items={items} state={state} emptyTitle="当前没有可见事项" />
     </div>
   );
@@ -1627,32 +2409,42 @@ function DrawingAdmin() {
   );
 }
 
-function MasterDataPage() {
+function MasterDataPage({ state }: { state: AppState }) {
+  useEffect(() => {
+    void state.refreshDirectory();
+  }, [state.refreshDirectory]);
   return (
     <div className="stack">
       <PageHeader title="基础数据" meta="标段、单位、区域、专业" action={<Button>Excel 导入</Button>} />
+      {state.directoryState === "loading" ? <p className="muted">正在刷新基础数据...</p> : null}
+      {state.directoryState === "error" && state.dataError ? <p className="error-text">{state.dataError}</p> : null}
       <div className="two-col">
-        <MasterList title="标段" rows={sections.map((item) => [item.code, item.name])} />
-        <MasterList title="单位" rows={organizations.map((item) => [item.type, item.name])} />
-        <MasterList title="区域" rows={areas.map((item) => [item.code, item.name])} />
-        <MasterList title="专业" rows={disciplines.map((item) => [item.code, item.name])} />
+        <MasterList title="标段" rows={state.directory.sections.map((item) => [item.code, item.name])} />
+        <MasterList title="单位" rows={state.directory.organizations.map((item) => [item.type, item.name])} />
+        <MasterList title="区域" rows={state.directory.areas.map((item) => [item.code, item.name])} />
+        <MasterList title="专业" rows={state.directory.disciplines.map((item) => [item.code, item.name])} />
       </div>
     </div>
   );
 }
 
-function UsersPage() {
+function UsersPage({ state }: { state: AppState }) {
+  useEffect(() => {
+    void state.refreshDirectory();
+  }, [state.refreshDirectory]);
   return (
     <div className="stack">
       <PageHeader title="用户与权限" meta="角色、单位、标段授权" action={<Button>创建用户</Button>} />
+      {state.directoryState === "loading" ? <p className="muted">正在刷新用户目录...</p> : null}
+      {state.directoryState === "error" && state.dataError ? <p className="error-text">{state.dataError}</p> : null}
       <DataTable
         columns={["姓名", "角色", "单位", "状态", "授权标段"]}
-        rows={users.map((user) => [
+        rows={state.directory.users.map((user) => [
           user.name,
           roleLabel(user.role),
-          getOrganization(user.organizationId)?.name || "-",
+          directoryItem(state.directory.organizations, user.organizationId)?.name || "-",
           user.isActive ? "启用" : "停用",
-          user.sectionScopeIds.map((id) => getSection(id)?.name).join("、")
+          user.sectionScopeIds.map((id) => directoryItem(state.directory.sections, id)?.name).join("、")
         ])}
       />
     </div>
@@ -1671,13 +2463,27 @@ function ExportsPage() {
   );
 }
 
-function AuditPage() {
+function AuditPage({ state }: { state: AppState }) {
+  const [resourceType, setResourceType] = useState("");
+  const [action, setAction] = useState("");
+  useEffect(() => {
+    void state.refreshAuditLogs({
+      resourceType: resourceType.trim() || undefined,
+      action: action.trim() || undefined
+    });
+  }, [action, resourceType, state.refreshAuditLogs]);
   return (
     <div className="stack">
       <PageHeader title="审计日志" meta="按用户、时间、资源、动作筛选" action={<Button variant="secondary">导出审计</Button>} />
+      <div className="filter-bar">
+        <TextInput placeholder="资源类型，例如 SiteItem" value={resourceType} onChange={(event) => setResourceType(event.target.value)} />
+        <TextInput placeholder="动作，例如 create" value={action} onChange={(event) => setAction(event.target.value)} />
+      </div>
+      {state.auditLogState === "loading" ? <p className="muted">正在刷新审计日志...</p> : null}
+      {state.auditLogState === "error" && state.dataError ? <p className="error-text">{state.dataError}</p> : null}
       <DataTable
         columns={["时间", "用户", "动作", "资源", "资源 ID"]}
-        rows={auditLogs.map((log) => [formatDate(log.createdAt), getUser(log.actorId)?.name || "-", log.action, log.resourceType, log.resourceId])}
+        rows={state.auditLogRecords.map((log) => [formatDate(log.createdAt), getUser(log.actorId)?.name || "-", log.action, log.resourceType, log.resourceId])}
       />
     </div>
   );
@@ -1723,15 +2529,26 @@ function StatusPill({ text }: { text: string }) {
   return <span className={`tag upload-${text}`}>{text}</span>;
 }
 
-function PhotoPreviewModal({ photo, item, onClose }: { photo: PhotoAttachment; item?: SiteItem; onClose: () => void }) {
+function PhotoPreviewModal({ state, photo, item, onClose }: { state: AppState; photo: PhotoAttachment; item?: SiteItem; onClose: () => void }) {
+  const previewUrl = state.photoPreviewUrls[photo.id];
+  useEffect(() => {
+    void state.loadPhotoPreview(photo.id);
+  }, [photo.id, state.loadPhotoPreview]);
   return (
     <div className="modal-backdrop">
       <section className="modal photo-preview-modal">
         <PageHeader title="照片预览" meta={photo.fileName} action={<Button variant="ghost" onClick={onClose}>关闭</Button>} />
         <div className="photo-preview-frame">
-          <span>{photoStageLabel(photo.stage)}</span>
-          <strong>{photo.fileName}</strong>
+          {previewUrl ? (
+            <img src={previewUrl} alt={photo.fileName} />
+          ) : (
+            <>
+              <span>{photoStageLabel(photo.stage)}</span>
+              <strong>{photo.fileName}</strong>
+            </>
+          )}
         </div>
+        {state.dataError && !state.runtimeConfig.useMocks ? <p className="error-text">{state.dataError}</p> : null}
         <dl className="detail-grid">
           <div><dt>状态</dt><dd>{item ? `${item.itemNo} · ${photoStageLabel(photo.stage)}` : "未绑定"}</dd></div>
           <div><dt>上传人</dt><dd>{getUser(photo.uploadedBy)?.name || "未知上传人"}</dd></div>

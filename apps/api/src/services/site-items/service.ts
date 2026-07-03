@@ -15,6 +15,10 @@ export interface SiteItemDetailPayload extends SiteItem {
   allowedActions: ReturnType<typeof allowedWorkflowActions>;
 }
 
+export interface SiteItemListPayload extends SiteItem {
+  allowedActions: ReturnType<typeof allowedWorkflowActions>;
+}
+
 export interface CreateSiteItemInput {
   sectionId?: string;
   type?: SiteItemType;
@@ -57,8 +61,12 @@ export class SiteItemsService {
     private readonly notificationsRepository: NotificationsRepository
   ) {}
 
-  async list(viewer: User, filters: SiteItemListFilters = {}): Promise<SiteItem[]> {
-    return this.repository.list(viewer, filters);
+  async list(viewer: User, filters: SiteItemListFilters = {}): Promise<SiteItemListPayload[]> {
+    const items = await this.repository.list(viewer, filters);
+    return items.map((item) => ({
+      ...item,
+      allowedActions: allowedWorkflowActions(viewer, item)
+    }));
   }
 
   async detail(viewer: User, itemId: string): Promise<SiteItemDetailPayload> {

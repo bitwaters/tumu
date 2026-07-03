@@ -192,6 +192,11 @@ export interface UploadQueueItem {
   state: UploadState;
   uploadedBy: string;
   siteItemId?: string;
+  file?: File;
+  objectKey?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  completeRequestKey?: string;
 }
 
 export interface DraftItem {

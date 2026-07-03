@@ -24,6 +24,14 @@ export class UsersService {
     return users.map(mapPublicUser);
   }
 
+  async listVisible(viewer: User, options: UserListOptions = {}): Promise<PublicUser[]> {
+    if (viewer.role === "admin") return this.list(options);
+    const users = await this.repository.list({ ...options, active: true });
+    return users
+      .filter((user) => canViewerSeeUser(viewer, user))
+      .map(mapPublicUser);
+  }
+
   async findById(userId: string): Promise<PublicUser | undefined> {
     const user = await this.repository.findById(userId);
     return user ? mapPublicUser(user) : undefined;
@@ -158,4 +166,12 @@ export class UsersService {
 
 function requireAdmin(user: User): void {
   if (user.role !== "admin") throw forbidden();
+}
+
+function canViewerSeeUser(viewer: User, user: User): boolean {
+  if (user.id === viewer.id) return true;
+  const sharesSection = user.sectionScopeIds.some((sectionId) => viewer.sectionScopeIds.includes(sectionId));
+  if (viewer.role === "supervisor") return sharesSection;
+  if (viewer.role === "contractor_manager") return user.organizationId === viewer.organizationId && sharesSection;
+  return false;
 }

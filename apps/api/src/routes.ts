@@ -98,6 +98,20 @@ export function buildRouter(store: Store, config: ApiConfig): Router {
       .map(publicUser);
   });
 
+  router.add("GET", "/users/visible", (request) => {
+    authenticate(request, store, config);
+    const { user } = requireContext(request);
+    const search = request.query.get("search")?.toLowerCase();
+    const role = request.query.get("role");
+    const active = parseOptionalBoolean(request.query.get("active"));
+    return store.users
+      .filter((candidate) => candidate.id === user.id || visibleUserFor(user, candidate))
+      .filter((candidate) => !role || candidate.role === role)
+      .filter((candidate) => active === undefined || candidate.isActive === active)
+      .filter((candidate) => !search || `${candidate.name} ${candidate.username} ${candidate.phone}`.toLowerCase().includes(search))
+      .map(publicUser);
+  });
+
   router.add("POST", "/users", async (request) => {
     authenticate(request, store, config);
     const { user } = requireContext(request);
@@ -296,7 +310,8 @@ export function buildRouter(store: Store, config: ApiConfig): Router {
       .filter((item) => !request.query.get("disciplineId") || item.disciplineId === request.query.get("disciplineId"))
       .filter((item) => !request.query.get("organizationId") || item.responsibleOrgId === request.query.get("organizationId"))
       .filter((item) => request.query.get("overdue") !== "true" || (new Date(item.dueAt).getTime() < now && item.status !== "closed" && item.status !== "voided"))
-      .filter((item) => !search || `${item.itemNo} ${item.title} ${item.description}`.toLowerCase().includes(search));
+      .filter((item) => !search || `${item.itemNo} ${item.title} ${item.description}`.toLowerCase().includes(search))
+      .map((item) => ({ ...item, allowedActions: allowedActions(user, item) }));
   });
 
   router.add("GET", "/site-items/:id", (request) => {
@@ -722,6 +737,14 @@ function filterMasterDataForUser<T extends MutableMaster>(name: string, collecti
     return collection.filter((record) => visibleDisciplineIds.size === 0 || visibleDisciplineIds.has(record.id));
   }
   return collection;
+}
+
+function visibleUserFor(viewer: User, user: User): boolean {
+  const sharesSection = user.sectionScopeIds.some((sectionId) => viewer.sectionScopeIds.includes(sectionId));
+  if (viewer.role === "admin") return true;
+  if (viewer.role === "supervisor") return sharesSection;
+  if (viewer.role === "contractor_manager") return user.organizationId === viewer.organizationId && sharesSection;
+  return false;
 }
 
 function pickSiteItemEdits(body: Record<string, unknown>): Partial<SiteItem> {

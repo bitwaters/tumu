@@ -6,11 +6,33 @@
 - `npm run start:api`：启动编译后的 API，默认监听 `127.0.0.1:4000`。
 - `npm run test:api`：运行后端 API 与权限测试。
 - `npm run typecheck:api`：只做 TypeScript 类型检查。
+- `npm run build:web`：按默认 API 模式构建前端；需要 mock 原型时使用 `VITE_USE_MOCKS=true npm run build:web`。
 - `npm --workspace @site-management/api run test:db:setup`：对 `TEST_DATABASE_URL` 应用迁移并写入演示种子数据；未设置 `TEST_DATABASE_URL` 时需要显式 `ALLOW_DATABASE_SEED=true`。
 - `npm --workspace @site-management/api run test:db:reset`：重置 `TEST_DATABASE_URL` 后重新迁移和 seed；未设置 `TEST_DATABASE_URL` 时需要显式 `ALLOW_DATABASE_RESET=true`。
 - `TEST_DATABASE_URL=... npm run test:api`：运行包含 Prisma/PostgreSQL 路由合同测试的后端测试；未设置 `TEST_DATABASE_URL` 时该组数据库测试会自动跳过。
 - `npm run infra:up`：启动 PostgreSQL、Redis、MinIO、API 和 Web。
 - `npm run infra:down`：停止本地基础设施。
+
+## Web/API 联调
+
+默认前端连接 `http://127.0.0.1:4000`。本地联调推荐顺序：
+
+```bash
+npm run infra:up
+npm run db:migrate
+npm run db:seed
+npm run build:api
+npm run start:api
+VITE_API_BASE_URL=http://127.0.0.1:4000 npm run dev:web
+```
+
+如只查看 UI 原型，可跳过 API 和数据库，使用：
+
+```bash
+VITE_USE_MOCKS=true npm run dev:web
+```
+
+照片上传需要 `S3_ENDPOINT` 指向可访问的 MinIO/S3 服务；前端会先调用 `/photos/presign`，再上传对象，最后调用 `/photos/complete` 写入图库记录。
 
 ## 环境变量
 
