@@ -12,4 +12,4 @@
 
 ## 3. Archive
 
-- [ ] 3.1 Archive the OpenSpec change after implementation completes.
+- [x] 3.1 Archive the OpenSpec change after implementation completes.
