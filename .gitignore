@@ -6,6 +6,7 @@ apps/*/.tmp-tests/
 apps/*/vite.config.js
 apps/*/vite.config.d.ts
 .DS_Store
+*.swp
 .env
 .env.local
 .env.production

@@ -51,7 +51,7 @@ services:
       context: .
       dockerfile: infra/docker/api.Dockerfile
       args:
-        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org/}
+        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com/}
     image: site-management-api:${APP_IMAGE_TAG:-local}
     restart: unless-stopped
     environment:
@@ -89,7 +89,7 @@ services:
       dockerfile: infra/docker/web.Dockerfile
       args:
         VITE_API_BASE_URL: ${PUBLIC_API_BASE_URL}
-        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org/}
+        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com/}
     image: site-management-web:${APP_IMAGE_TAG:-local}
     restart: unless-stopped
     ports:
