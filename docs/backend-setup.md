@@ -79,7 +79,7 @@ TEST_DATABASE_URL=postgresql://site_user:site_password@127.0.0.1:55432/site_mana
 
 生产部署使用 [production-deployment.md](/Users/yang/Documents/project123/docs/production-deployment.md) 和 `.env.production`。首次部署推荐运行 `npm run prod:init-env -- --host 10.0.0.8` 生成 `.env.production`，并将示例 IP 替换为实际生产主机名或内网 IP；`.env.production.example` 只作为人工配置参考，不应直接带着 `CHANGE_ME` 示例值上线。生产环境与本地开发的关键差异：
 
-- 使用 `infra/docker-compose.prod.yml`，不挂载源码、不运行 Vite dev server。
+- 使用根目录 `docker-compose.yml`，不挂载源码、不运行 Vite dev server。
 - Web 使用 Nginx 托管构建后的静态文件。
 - API 使用编译后的 `dist/index.js`。
 - 密钥、数据库密码、对象存储密码和公开访问地址都来自 `.env.production`。

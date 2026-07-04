@@ -4,7 +4,7 @@
 Defines the production Docker Compose runtime, environment template, deployment scripts, migration flow, and smoke validation needed for project intranet deployment.
 ## Requirements
 ### Requirement: Production Compose Runtime
-The system SHALL provide a production Docker Compose runtime that starts Web, API, PostgreSQL, Redis, and MinIO/S3-compatible storage using production commands, persistent volumes, health checks, restart policies, and environment-driven configuration.
+The system SHALL provide a root-level production Docker Compose runtime that starts Web, API, PostgreSQL, Redis, and MinIO/S3-compatible storage using production commands, persistent volumes, health checks, restart policies, and environment-driven configuration.
 
 #### Scenario: Production compose config validates
 - **WHEN** an operator runs the documented production Compose config validation command with a completed production environment file

@@ -5,7 +5,7 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 ENV_FILE=${ENV_FILE:-"$PROJECT_ROOT/.env.production"}
-COMPOSE_FILE=${COMPOSE_FILE:-"$PROJECT_ROOT/infra/docker-compose.prod.yml"}
+COMPOSE_FILE=${COMPOSE_FILE:-"$PROJECT_ROOT/docker-compose.yml"}
 
 fail() {
   printf 'ERROR: %s\n' "$*" >&2

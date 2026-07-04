@@ -1,6 +1,6 @@
 # 生产部署手册
 
-本文档面向项目内网单服务器或单 VM 部署。生产部署使用 Docker Compose 管理 Web、API、PostgreSQL、Redis 和 MinIO。
+本文档面向项目内网单服务器或单 VM 部署。生产部署使用根目录 [docker-compose.yml](/Users/yang/Documents/project123/docker-compose.yml) 管理 Web、API、PostgreSQL、Redis 和 MinIO。
 
 ## 1. 前置条件
 
@@ -36,6 +36,16 @@ npm run prod:deploy -- --host 10.0.0.8 --skip-smoke
 ```bash
 npm run prod:smoke
 ```
+
+根目录已经提供生产 [docker-compose.yml](/Users/yang/Documents/project123/docker-compose.yml)。如只需要直接操作容器，可以使用：
+
+```bash
+docker compose --env-file .env.production up -d
+docker compose --env-file .env.production ps
+docker compose --env-file .env.production logs -f api
+```
+
+首次上线仍推荐使用 `npm run prod:deploy`，因为它会额外执行预检查、数据库迁移和烟测，避免只启动了容器但应用未完成初始化。
 
 ## 3. 环境文件说明
 
@@ -111,7 +121,7 @@ npm run prod:smoke
 
 ```bash
 git rev-parse HEAD
-docker compose --env-file .env.production -f infra/docker-compose.prod.yml ps
+docker compose --env-file .env.production -f docker-compose.yml ps
 ```
 
 ## 5. 日常启动与停止
@@ -137,8 +147,8 @@ npm run prod:status
 查看日志：
 
 ```bash
-docker compose --env-file .env.production -f infra/docker-compose.prod.yml logs -f api
-docker compose --env-file .env.production -f infra/docker-compose.prod.yml logs -f web
+docker compose --env-file .env.production -f docker-compose.yml logs -f api
+docker compose --env-file .env.production -f docker-compose.yml logs -f web
 ```
 
 ## 6. 升级流程

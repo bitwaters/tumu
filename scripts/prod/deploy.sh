@@ -23,7 +23,7 @@ Options:
 
 Environment:
   ENV_FILE                     Defaults to .env.production
-  COMPOSE_FILE                 Defaults to infra/docker-compose.prod.yml
+  COMPOSE_FILE                 Defaults to docker-compose.yml
   DEPLOY_DRY_RUN=true          Print commands without executing them
 EOF
 }

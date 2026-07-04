@@ -15,7 +15,7 @@ async function runDeploy(args, dir) {
       ...process.env,
       DEPLOY_DRY_RUN: "true",
       ENV_FILE: join(dir, ".env.production"),
-      COMPOSE_FILE: join(dir, "docker-compose.prod.yml")
+      COMPOSE_FILE: join(dir, "docker-compose.yml")
     }
   });
 }
