@@ -7,7 +7,7 @@
 - Linux 服务器已安装 Docker Engine 和 Docker Compose plugin。
 - 服务器能访问项目代码或发布包。
 - 已规划持久化磁盘和备份目录，例如 `/var/backups/site-management`。
-- 已确认生产访问主机名或内网 IP，例如 `power-site.internal` 或 `10.0.0.8`。
+- 已确认生产访问主机名或内网 IP，例如 `power-site.internal` 或 `<SERVER_HOST_OR_IP>`。
 - 已准备或计划创建用于上线烟测的生产账号。
 
 ## 2. 首次部署
@@ -22,13 +22,13 @@ sudo chown "$USER":"$USER" /var/backups/site-management
 2. 运行一键部署命令。首次部署时如果 `.env.production` 不存在，命令会先生成生产环境文件，然后依次执行预检查、构建镜像、启动服务、数据库迁移、状态检查和上线烟测：
 
 ```bash
-npm run prod:deploy -- --host 10.0.0.8 --smoke-username wang.supervisor --smoke-password STRONG_SMOKE_PASSWORD
+npm run prod:deploy -- --host <SERVER_HOST_OR_IP> --smoke-username wang.supervisor --smoke-password STRONG_SMOKE_PASSWORD
 ```
 
-将 `10.0.0.8` 替换为实际生产主机名或内网 IP。已有 `.env.production` 时，一键部署会复用现有文件，不会覆盖生产密钥。若生产烟测账号尚未创建，可先运行：
+将 `<SERVER_HOST_OR_IP>` 替换为实际生产主机名或内网 IP。已有 `.env.production` 时，一键部署会复用现有文件，不会覆盖生产密钥。若生产烟测账号尚未创建，可先运行：
 
 ```bash
-npm run prod:deploy -- --host 10.0.0.8 --skip-smoke
+npm run prod:deploy -- --host <SERVER_HOST_OR_IP> --skip-smoke
 ```
 
 烟测账号创建或导入后，再运行：
@@ -52,10 +52,10 @@ docker compose --env-file .env.production logs -f api
 如需单独生成生产环境文件，可运行：
 
 ```bash
-npm run prod:init-env -- --host 10.0.0.8 --smoke-username wang.supervisor --smoke-password STRONG_SMOKE_PASSWORD
+npm run prod:init-env -- --host <SERVER_HOST_OR_IP> --smoke-username wang.supervisor --smoke-password STRONG_SMOKE_PASSWORD
 ```
 
-将 `10.0.0.8` 替换为实际生产主机名或内网 IP。`--host` 不要带 `http://`、端口或路径。脚本会生成 `.env.production`，自动写入 PostgreSQL、MinIO、JWT 等随机生产密钥，并按 host 生成：
+将 `<SERVER_HOST_OR_IP>` 替换为实际生产主机名或内网 IP。`--host` 不要带 `http://`、端口或路径。脚本会生成 `.env.production`，自动写入 PostgreSQL、MinIO、JWT、演示 seed 初始密码等随机生产密钥，并按 host 生成：
 
 - `PUBLIC_API_BASE_URL`
 - `PUBLIC_WEB_BASE_URL`
@@ -74,6 +74,7 @@ npm run prod:init-env -- --host 10.0.0.8 --smoke-username wang.supervisor --smok
 检查 `.env.production`：
 
 - `SMOKE_USERNAME` 和 `SMOKE_PASSWORD` 必须与后续创建或导入的真实生产账号一致，否则 `npm run prod:smoke` 会失败。
+- 只有在空库需要演示账号时才执行 `prisma:seed`；执行前必须确认 `.env.production` 中存在 `SEED_DEMO_PASSWORD`，或同时存在 `SEED_ADMIN_PASSWORD` 和 `SEED_USER_PASSWORD`。
 - 如使用非默认端口、反向代理或域名，需要确认 `PUBLIC_API_BASE_URL` 和 `PUBLIC_WEB_BASE_URL` 是用户浏览器可访问的地址，且 `API_CORS_ORIGIN` 等于浏览器实际打开 Web 的源地址。
 - `.env.production` 含真实密钥，不应提交到 Git，也不要复制到不受控的位置。
 

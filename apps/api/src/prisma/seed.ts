@@ -3,11 +3,36 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createStore } from "../data.js";
 
+ensureSeedPasswordsConfigured();
+
 const store = createStore();
 
 type SqlValue = unknown;
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+
+function ensureSeedPasswordsConfigured(): void {
+  const hasSharedPassword = Boolean(process.env.SEED_DEMO_PASSWORD);
+  const hasSpecificPasswords = Boolean(process.env.SEED_ADMIN_PASSWORD && process.env.SEED_USER_PASSWORD);
+  const allowLocalFallback = process.env.ALLOW_INSECURE_DEMO_PASSWORDS === "true" || process.env.NODE_ENV === "test";
+
+  if (!hasSharedPassword && !hasSpecificPasswords && !allowLocalFallback) {
+    throw new Error(
+      "Seed passwords are required. Set SEED_DEMO_PASSWORD, or set both SEED_ADMIN_PASSWORD and SEED_USER_PASSWORD. For local-only demo data, set ALLOW_INSECURE_DEMO_PASSWORDS=true."
+    );
+  }
+
+  for (const [name, value] of Object.entries({
+    SEED_DEMO_PASSWORD: process.env.SEED_DEMO_PASSWORD,
+    SEED_ADMIN_PASSWORD: process.env.SEED_ADMIN_PASSWORD,
+    SEED_USER_PASSWORD: process.env.SEED_USER_PASSWORD
+  })) {
+    if (!value) continue;
+    if (value.includes("CHANGE_ME") || value === "admin123" || value === "password123") {
+      throw new Error(`${name} must be replaced with a non-default value before seeding.`);
+    }
+  }
+}
 
 function sql(value: SqlValue | undefined): string {
   if (value === undefined || value === null) return "NULL";

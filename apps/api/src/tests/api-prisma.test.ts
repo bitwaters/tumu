@@ -35,7 +35,7 @@ if (!databaseUrl) {
     const router = buildPrismaRouter(runtime.prisma, config);
     const request = createPrismaHarness(router);
 
-    const adminToken = await login(request, "admin", "admin123");
+    const adminToken = await login(request, "admin", "local-admin-demo-password");
     const supervisorToken = await login(request, "wang.supervisor");
     const rectifierToken = await login(request, "zhao.fix");
     const installRectifierToken = await login(request, "chen.fix");
@@ -58,7 +58,7 @@ if (!databaseUrl) {
         phone: "13800007777",
         username: "prisma.fix",
         role: "rectifier",
-        password: "password123",
+        password: "local-user-demo-password",
         sectionScopeIds: ["sec-civil-a"]
       },
       adminToken,
@@ -73,7 +73,7 @@ if (!databaseUrl) {
         phone: "13800007777",
         username: "prisma.fix",
         role: "rectifier",
-        password: "password123",
+        password: "local-user-demo-password",
         sectionScopeIds: ["sec-civil-a"]
       },
       adminToken,
@@ -111,7 +111,7 @@ if (!databaseUrl) {
             phone: "13800007779",
             username: "prisma.fix.conflict",
             role: "rectifier",
-            password: "password123",
+            password: "local-user-demo-password",
             sectionScopeIds: ["sec-civil-a"]
           },
           adminToken,
@@ -130,7 +130,7 @@ if (!databaseUrl) {
             phone: "13800007778",
             username: "prisma.fix",
             role: "rectifier",
-            password: "password123",
+            password: "local-user-demo-password",
             sectionScopeIds: ["sec-civil-a"]
           },
           adminToken
@@ -297,7 +297,7 @@ function createPrismaHarness(router: Router) {
   };
 }
 
-async function login(request: ReturnType<typeof createPrismaHarness>, username: string, password = "password123"): Promise<string> {
+async function login(request: ReturnType<typeof createPrismaHarness>, username: string, password = "local-user-demo-password"): Promise<string> {
   const result = (await request("POST", "/auth/login", { username, password })) as { accessToken: string };
   return result.accessToken;
 }

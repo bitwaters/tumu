@@ -31,6 +31,9 @@ reject_placeholder_secret S3_ACCESS_KEY
 reject_placeholder_secret S3_SECRET_KEY
 reject_placeholder_secret JWT_SECRET
 reject_placeholder_secret SMOKE_PASSWORD
+[ -z "${SEED_DEMO_PASSWORD:-}" ] || reject_placeholder_secret SEED_DEMO_PASSWORD
+[ -z "${SEED_ADMIN_PASSWORD:-}" ] || reject_placeholder_secret SEED_ADMIN_PASSWORD
+[ -z "${SEED_USER_PASSWORD:-}" ] || reject_placeholder_secret SEED_USER_PASSWORD
 
 [ ${#JWT_SECRET} -ge 32 ] || fail "JWT_SECRET must be at least 32 characters"
 require_backup_dir

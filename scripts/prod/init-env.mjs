@@ -128,6 +128,7 @@ export function buildEnv(options) {
     `JWT_SECRET=${secret(48)}`,
     `UPLOAD_MAX_BYTES=${options.uploadMaxBytes}`,
     `IDEMPOTENCY_TTL_HOURS=${options.idempotencyTtlHours}`,
+    `SEED_DEMO_PASSWORD=${secret(24)}`,
     "",
     `BACKUP_DIR=${options.backupDir}`,
     "",

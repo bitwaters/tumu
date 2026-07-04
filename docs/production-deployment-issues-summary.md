@@ -1,23 +1,23 @@
 # 生产环境部署问题复盘
 
-本文记录本项目首次部署到生产服务器过程中遇到的问题、根因、处理方式和后续标准操作。服务器部署目录示例为 `/www/tumu/tumu`，公网访问 IP 示例为 `45.205.16.15`。
+本文记录本项目首次部署到生产服务器过程中遇到的问题、根因、处理方式和后续标准操作。文中的服务器目录、仓库地址、主机名和账号信息均使用占位符，不记录真实生产敏感信息。
 
 ## 最终部署状态
 
-- 代码仓库：`https://github.com/bitwaters/tumu.git`
+- 代码仓库：`<GIT_REPOSITORY_URL>`
 - 部署方式：服务器项目目录下直接执行 `docker compose`
 - Compose 文件：项目根目录 `docker-compose.yml`
 - 环境变量文件：项目根目录 `.env`
-- Web 访问地址：`http://45.205.16.15:8080`
-- API 地址：`http://45.205.16.15:4000`
+- Web 访问地址：`http://<SERVER_HOST_OR_IP>:8080`
+- API 地址：`http://<SERVER_HOST_OR_IP>:4000`
 - 数据存储目录：项目目录下 `data/`
 
 当前数据目录结构：
 
 ```text
-/www/tumu/tumu/data/postgres
-/www/tumu/tumu/data/redis
-/www/tumu/tumu/data/minio
+<PROJECT_DIR>/data/postgres
+<PROJECT_DIR>/data/redis
+<PROJECT_DIR>/data/minio
 ```
 
 其中：
@@ -83,7 +83,7 @@ gh auth setup-git
 服务器上执行：
 
 ```bash
-npm run prod:init-env -- --host 45.205.16.15
+npm run prod:init-env -- --host <SERVER_HOST_OR_IP>
 ```
 
 报错：
@@ -111,7 +111,7 @@ npm: command not found
 不必须。1Panel 的容器编排本质上也是执行 Docker Compose。项目可以直接在目录下执行：
 
 ```bash
-cd /www/tumu/tumu
+cd <PROJECT_DIR>
 docker compose up -d --build
 ```
 
@@ -136,7 +136,7 @@ minio
 生成 `.env` 文件，并在服务器项目目录放置：
 
 ```text
-/www/tumu/tumu/.env
+<PROJECT_DIR>/.env
 ```
 
 关键配置包括：
@@ -149,9 +149,9 @@ POSTGRES_DB=site_management
 POSTGRES_USER=site_user
 POSTGRES_PASSWORD=生产强密码
 
-PUBLIC_API_BASE_URL=http://45.205.16.15:4000
-PUBLIC_WEB_BASE_URL=http://45.205.16.15:8080
-API_CORS_ORIGIN=http://45.205.16.15:8080
+PUBLIC_API_BASE_URL=http://<SERVER_HOST_OR_IP>:4000
+PUBLIC_WEB_BASE_URL=http://<SERVER_HOST_OR_IP>:8080
+API_CORS_ORIGIN=http://<SERVER_HOST_OR_IP>:8080
 
 S3_ACCESS_KEY=生产随机值
 S3_SECRET_KEY=生产随机值
@@ -185,9 +185,9 @@ DATA_ROOT=./data
 现在数据默认存储在项目当前目录：
 
 ```text
-/www/tumu/tumu/data/postgres
-/www/tumu/tumu/data/redis
-/www/tumu/tumu/data/minio
+<PROJECT_DIR>/data/postgres
+<PROJECT_DIR>/data/redis
+<PROJECT_DIR>/data/minio
 ```
 
 后续如果要迁移到其他磁盘，只需要修改 `.env`：
@@ -289,16 +289,18 @@ Invalid credentials
 docker compose exec api npm --workspace @site-management/api run prisma:seed
 ```
 
-默认账号：
+执行 seed 前，`.env` 必须配置 `SEED_DEMO_PASSWORD`，或分别配置 `SEED_ADMIN_PASSWORD`、`SEED_USER_PASSWORD`。生产环境不再允许使用固定默认密码写入演示账号。
+
+默认演示账号：
 
 ```text
-管理员：admin / admin123
-监理：wang.supervisor / password123
-施工负责人：li.manager / password123
-整改人：zhao.fix / password123
+管理员：admin / <DEMO_INITIAL_PASSWORD>
+监理：wang.supervisor / <DEMO_INITIAL_PASSWORD>
+施工负责人：li.manager / <DEMO_INITIAL_PASSWORD>
+整改人：zhao.fix / <DEMO_INITIAL_PASSWORD>
 ```
 
-注意：`prisma:seed` 会清空并重写演示数据。正式录入数据后，不要随意再次执行。
+注意：`prisma:seed` 会清空并重写演示数据。正式录入数据后，不要随意再次执行。演示初始密码只应保存在受控交付记录中，首次登录后必须立即修改。
 
 ### 10. 后台修改账号密码是否永久保存
 
@@ -309,13 +311,13 @@ docker compose exec api npm --workspace @site-management/api run prisma:seed
 当前 API 使用 Prisma/PostgreSQL，后台修改用户、密码、事项等数据会写入 PostgreSQL：
 
 ```text
-/www/tumu/tumu/data/postgres
+<PROJECT_DIR>/data/postgres
 ```
 
 照片和附件对象文件写入 MinIO：
 
 ```text
-/www/tumu/tumu/data/minio
+<PROJECT_DIR>/data/minio
 ```
 
 重启容器或执行 `docker compose down` 不会删除这些目录数据。
@@ -325,9 +327,9 @@ docker compose exec api npm --workspace @site-management/api run prisma:seed
 首次部署或重建服务器时，推荐顺序如下：
 
 ```bash
-cd /www/tumu
-git clone https://github.com/bitwaters/tumu.git
-cd /www/tumu/tumu
+cd <PROJECT_PARENT_DIR>
+git clone <GIT_REPOSITORY_URL>
+cd <PROJECT_DIR>
 ```
 
 创建 `.env`，确认至少包含：
@@ -339,9 +341,10 @@ POSTGRES_PASSWORD=生产强密码
 S3_ACCESS_KEY=生产随机值
 S3_SECRET_KEY=生产随机值
 JWT_SECRET=生产随机值
-PUBLIC_API_BASE_URL=http://45.205.16.15:4000
-PUBLIC_WEB_BASE_URL=http://45.205.16.15:8080
-API_CORS_ORIGIN=http://45.205.16.15:8080
+PUBLIC_API_BASE_URL=http://<SERVER_HOST_OR_IP>:4000
+PUBLIC_WEB_BASE_URL=http://<SERVER_HOST_OR_IP>:8080
+API_CORS_ORIGIN=http://<SERVER_HOST_OR_IP>:8080
+SEED_DEMO_PASSWORD=演示账号临时初始密码
 ```
 
 启动容器：
@@ -363,10 +366,12 @@ docker compose restart api
 docker compose exec api npm --workspace @site-management/api run prisma:seed
 ```
 
+执行前必须确认容器环境中已有 `SEED_DEMO_PASSWORD`，或同时已有 `SEED_ADMIN_PASSWORD` 和 `SEED_USER_PASSWORD`；禁止使用固定弱口令作为演示账号初始密码。
+
 访问：
 
 ```text
-http://45.205.16.15:8080
+http://<SERVER_HOST_OR_IP>:8080
 ```
 
 ## 后续更新流程
@@ -374,7 +379,7 @@ http://45.205.16.15:8080
 代码更新后：
 
 ```bash
-cd /www/tumu/tumu
+cd <PROJECT_DIR>
 git pull
 docker compose build --no-cache api web
 docker compose up -d
@@ -414,7 +419,7 @@ curl http://127.0.0.1:8080/health
 查看数据目录：
 
 ```bash
-ls -lah /www/tumu/tumu/data
+ls -lah <PROJECT_DIR>/data
 ```
 
 ## 重要注意事项
@@ -429,6 +434,6 @@ ls -lah /www/tumu/tumu/data
 简单备份命令：
 
 ```bash
-cd /www/tumu/tumu
+cd <PROJECT_DIR>
 tar -czf tumu-data-backup-$(date +%Y%m%d-%H%M%S).tar.gz data .env
 ```

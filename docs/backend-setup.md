@@ -12,8 +12,8 @@
 - `TEST_DATABASE_URL=... npm run test:api`：运行包含 Prisma/PostgreSQL 路由合同测试的后端测试；未设置 `TEST_DATABASE_URL` 时该组数据库测试会自动跳过。
 - `npm run infra:up`：启动 PostgreSQL、Redis、MinIO、API 和 Web。
 - `npm run infra:down`：停止本地基础设施。
-- `npm run prod:init-env -- --host 10.0.0.8`：生成 `.env.production`，写入随机生产密钥和 host 派生的公开访问地址；已有文件默认不会被覆盖。
-- `npm run prod:deploy -- --host 10.0.0.8`：一键执行生产 env 初始化、预检查、镜像构建、Compose 启动、数据库迁移、状态检查和烟测；已有 `.env.production` 时会复用现有配置。
+- `npm run prod:init-env -- --host <SERVER_HOST_OR_IP>`：生成 `.env.production`，写入随机生产密钥和 host 派生的公开访问地址；已有文件默认不会被覆盖。
+- `npm run prod:deploy -- --host <SERVER_HOST_OR_IP>`：一键执行生产 env 初始化、预检查、镜像构建、Compose 启动、数据库迁移、状态检查和烟测；已有 `.env.production` 时会复用现有配置。
 - `npm run prod:preflight`：读取 `.env.production` 并验证生产部署必填项、密钥、备份目录和 Compose 配置。
 - `npm run prod:build`：构建生产 API/Web 镜像。
 - `npm run prod:migrate`：对生产数据库执行 Prisma migrations，不写入演示 seed。
@@ -77,7 +77,7 @@ TEST_DATABASE_URL=postgresql://site_user:site_password@127.0.0.1:55432/site_mana
 
 ## 生产部署
 
-生产部署使用 [production-deployment.md](/Users/yang/Documents/project123/docs/production-deployment.md) 和 `.env.production`。首次部署推荐运行 `npm run prod:init-env -- --host 10.0.0.8` 生成 `.env.production`，并将示例 IP 替换为实际生产主机名或内网 IP；`.env.production.example` 只作为人工配置参考，不应直接带着 `CHANGE_ME` 示例值上线。生产环境与本地开发的关键差异：
+生产部署使用 [production-deployment.md](/Users/yang/Documents/project123/docs/production-deployment.md) 和 `.env.production`。首次部署推荐运行 `npm run prod:init-env -- --host <SERVER_HOST_OR_IP>` 生成 `.env.production`，并将占位符替换为实际生产主机名或内网 IP；`.env.production.example` 只作为人工配置参考，不应直接带着 `CHANGE_ME` 示例值上线。生产环境与本地开发的关键差异：
 
 - 使用根目录 `docker-compose.yml`，不挂载源码、不运行 Vite dev server。
 - Web 使用 Nginx 托管构建后的静态文件。
@@ -91,7 +91,4 @@ TEST_DATABASE_URL=postgresql://site_user:site_password@127.0.0.1:55432/site_mana
 
 ## 默认测试账号
 
-- 管理员：`admin` / `admin123`
-- 业主/监理：`wang.supervisor` / `password123`
-- 施工单位负责人：`li.manager` / `password123`
-- 整改人：`zhao.fix` / `password123`
+本地 seed 会创建管理员、业主/监理、施工单位负责人和整改人等演示账号。演示初始密码只用于本地或空库验证，不应写入公开文档或生产交付文档；生产环境执行 seed 前必须设置 `SEED_DEMO_PASSWORD`，或同时设置 `SEED_ADMIN_PASSWORD` 和 `SEED_USER_PASSWORD`。生产环境首次登录后必须立即修改密码。

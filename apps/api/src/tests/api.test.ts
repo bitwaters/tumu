@@ -32,7 +32,7 @@ function createHarness() {
   return { store, router, request };
 }
 
-async function login(request: ReturnType<typeof createHarness>["request"], username: string, password = "password123") {
+async function login(request: ReturnType<typeof createHarness>["request"], username: string, password = "local-user-demo-password") {
   const result = (await request("POST", "/auth/login", { username, password })) as { accessToken: string };
   return result.accessToken;
 }
@@ -43,7 +43,7 @@ test("auth returns current user and rejects disabled users", async () => {
   const me = (await request("GET", "/auth/me", undefined, token)) as { user: { username: string } };
   equal(me.user.username, "wang.supervisor");
   store.users.find((user) => user.username === "wang.supervisor")!.isActive = false;
-  await rejects(() => request("POST", "/auth/login", { username: "wang.supervisor", password: "password123" }));
+  await rejects(() => request("POST", "/auth/login", { username: "wang.supervisor", password: "local-user-demo-password" }));
 });
 
 test("current user can change password with audit trail", async () => {
@@ -53,25 +53,25 @@ test("current user can change password with audit trail", async () => {
   await rejects(() =>
     request("POST", "/auth/change-password", { currentPassword: "wrong-password", newPassword: "new-password-1" }, token)
   );
-  await login(request, "wang.supervisor", "password123");
+  await login(request, "wang.supervisor", "local-user-demo-password");
 
   const result = (await request(
     "POST",
     "/auth/change-password",
-    { currentPassword: "password123", newPassword: "new-password-1" },
+    { currentPassword: "local-user-demo-password", newPassword: "new-password-1" },
     token
   )) as { ok: true };
 
   equal(result.ok, true);
   await rejects(() => request("GET", "/auth/me", undefined, token));
-  await rejects(() => login(request, "wang.supervisor", "password123"));
+  await rejects(() => login(request, "wang.supervisor", "local-user-demo-password"));
   await login(request, "wang.supervisor", "new-password-1");
   ok(store.auditLogs.some((log) => log.actorId === "u-supervisor" && log.action === "change_password"));
 });
 
 test("admin can manage users, non-admin cannot", async () => {
   const { store, request } = createHarness();
-  const adminToken = await login(request, "admin", "admin123");
+  const adminToken = await login(request, "admin", "local-admin-demo-password");
   const supervisorToken = await login(request, "wang.supervisor");
   await rejects(() => request("GET", "/users", undefined, supervisorToken));
   const created = (await request(
@@ -83,7 +83,7 @@ test("admin can manage users, non-admin cannot", async () => {
       phone: "13800009999",
       username: "new.fix",
       role: "rectifier",
-      password: "password123",
+      password: "local-user-demo-password",
       sectionScopeIds: ["sec-civil-a"]
     },
     adminToken,
@@ -117,7 +117,7 @@ test("admin can manage users, non-admin cannot", async () => {
         phone: "13800008888",
         username: "new.fix",
         role: "rectifier",
-        password: "password123",
+        password: "local-user-demo-password",
         sectionScopeIds: ["sec-civil-a"]
       },
       adminToken
@@ -133,7 +133,7 @@ test("admin can manage users, non-admin cannot", async () => {
 
 test("master data read is scoped and writes are admin-only", async () => {
   const { request } = createHarness();
-  const adminToken = await login(request, "admin", "admin123");
+  const adminToken = await login(request, "admin", "local-admin-demo-password");
   const rectifierToken = await login(request, "zhao.fix");
   const sections = (await request("GET", "/master-data/sections", undefined, rectifierToken)) as Array<{ id: string }>;
   ok(sections.some((section) => section.id === "sec-civil-a"));
@@ -148,7 +148,7 @@ test("master data read is scoped and writes are admin-only", async () => {
 
 test("drawing APIs enforce admin writes and expose revision previews", async () => {
   const { request } = createHarness();
-  const adminToken = await login(request, "admin", "admin123");
+  const adminToken = await login(request, "admin", "local-admin-demo-password");
   const supervisorToken = await login(request, "wang.supervisor");
   const installRectifierToken = await login(request, "chen.fix");
   await rejects(() => request("POST", "/drawings", { areaId: "area-main", name: "临时图", code: "TMP" }, supervisorToken));
@@ -322,7 +322,7 @@ test("photo gallery is personal and preview is authorized", async () => {
 
 test("notifications and audit query are scoped", async () => {
   const { request } = createHarness();
-  const adminToken = await login(request, "admin", "admin123");
+  const adminToken = await login(request, "admin", "local-admin-demo-password");
   const rectifierToken = await login(request, "zhao.fix");
   const unread = (await request("GET", "/notifications/unread-count", undefined, rectifierToken)) as { count: number };
   ok(unread.count >= 1);
@@ -365,7 +365,7 @@ test("site item ledger export is scoped and downloadable", async () => {
 
 test("photo package, closeout PDF and audit exports create downloadable artifacts", async () => {
   const { request } = createHarness();
-  const adminToken = await login(request, "admin", "admin123");
+  const adminToken = await login(request, "admin", "local-admin-demo-password");
   const supervisorToken = await login(request, "wang.supervisor");
   const installRectifierToken = await login(request, "chen.fix");
 
@@ -403,7 +403,7 @@ test("photo package, closeout PDF and audit exports create downloadable artifact
 
 test("master data imports validate rows, apply accepted rows and replay idempotent requests", async () => {
   const { store, request } = createHarness();
-  const adminToken = await login(request, "admin", "admin123");
+  const adminToken = await login(request, "admin", "local-admin-demo-password");
   const supervisorToken = await login(request, "wang.supervisor");
   const initialSections = store.sections.length;
 
@@ -445,7 +445,7 @@ test("master data imports validate rows, apply accepted rows and replay idempote
 
 test("user imports validate references and never expose password hashes in job output", async () => {
   const { store, request } = createHarness();
-  const adminToken = await login(request, "admin", "admin123");
+  const adminToken = await login(request, "admin", "local-admin-demo-password");
   const csvText = [
     "organizationId,name,phone,username,role,password,sectionScopeIds,isActive",
     "org-civil,导入整改人,13800006666,import.fix,rectifier,secret123,sec-civil-a,true",

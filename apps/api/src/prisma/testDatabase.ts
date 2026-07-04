@@ -26,7 +26,7 @@ if (command === "setup" && !process.env.TEST_DATABASE_URL && process.env.ALLOW_D
   throw new Error("Refusing to seed DATABASE_URL. Set TEST_DATABASE_URL, or set ALLOW_DATABASE_SEED=true explicitly.");
 }
 
-const env = { ...process.env, DATABASE_URL: databaseUrl };
+const env = { ...process.env, DATABASE_URL: databaseUrl, ALLOW_INSECURE_DEMO_PASSWORDS: "true" };
 const migrationFile = "prisma/migrations/20260629000100_init/migration.sql";
 
 if (command === "setup") {

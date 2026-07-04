@@ -18,6 +18,12 @@ import type {
 } from "./types.js";
 import { hashPassword } from "./security.js";
 
+function demoPassword(kind: "admin" | "user"): string {
+  const sharedPassword = process.env.SEED_DEMO_PASSWORD;
+  const specificPassword = kind === "admin" ? process.env.SEED_ADMIN_PASSWORD : process.env.SEED_USER_PASSWORD;
+  return specificPassword ?? sharedPassword ?? (kind === "admin" ? "local-admin-demo-password" : "local-user-demo-password");
+}
+
 export const project: Project = {
   id: "project-power-001",
   name: "华东沿海燃机发电站建设项目",
@@ -47,7 +53,7 @@ export const users: User[] = [
     role: "admin",
     isActive: true,
     sectionScopeIds: sections.map((section) => section.id),
-    passwordHash: hashPassword("admin123")
+    passwordHash: hashPassword(demoPassword("admin"))
   },
   {
     id: "u-supervisor",
@@ -58,7 +64,7 @@ export const users: User[] = [
     role: "supervisor",
     isActive: true,
     sectionScopeIds: ["sec-civil-a", "sec-install-b"],
-    passwordHash: hashPassword("password123")
+    passwordHash: hashPassword(demoPassword("user"))
   },
   {
     id: "u-manager-civil",
@@ -69,7 +75,7 @@ export const users: User[] = [
     role: "contractor_manager",
     isActive: true,
     sectionScopeIds: ["sec-civil-a"],
-    passwordHash: hashPassword("password123")
+    passwordHash: hashPassword(demoPassword("user"))
   },
   {
     id: "u-rectifier-civil",
@@ -80,7 +86,7 @@ export const users: User[] = [
     role: "rectifier",
     isActive: true,
     sectionScopeIds: ["sec-civil-a"],
-    passwordHash: hashPassword("password123")
+    passwordHash: hashPassword(demoPassword("user"))
   },
   {
     id: "u-rectifier-install",
@@ -91,7 +97,7 @@ export const users: User[] = [
     role: "rectifier",
     isActive: true,
     sectionScopeIds: ["sec-install-b"],
-    passwordHash: hashPassword("password123")
+    passwordHash: hashPassword(demoPassword("user"))
   }
 ];
 
