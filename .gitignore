@@ -9,4 +9,5 @@ apps/*/vite.config.d.ts
 .env
 .env.local
 .env.production
+data/
 .vite/

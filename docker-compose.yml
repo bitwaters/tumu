@@ -9,7 +9,7 @@ services:
     ports:
       - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
-      - site_management_postgres_prod:/var/lib/postgresql/data
+      - ${DATA_ROOT:-./data}/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 10s
@@ -21,7 +21,7 @@ services:
     restart: unless-stopped
     command: redis-server --appendonly yes
     volumes:
-      - site_management_redis_prod:/data
+      - ${DATA_ROOT:-./data}/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -39,7 +39,7 @@ services:
       - "127.0.0.1:${MINIO_API_HOST_PORT:-9000}:9000"
       - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
     volumes:
-      - site_management_minio_prod:/data
+      - ${DATA_ROOT:-./data}/minio:/data
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null"]
       interval: 10s
@@ -102,8 +102,3 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
-
-volumes:
-  site_management_postgres_prod:
-  site_management_redis_prod:
-  site_management_minio_prod:
