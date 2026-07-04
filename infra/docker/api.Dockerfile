@@ -1,6 +1,11 @@
 FROM node:22-alpine AS build
 
 WORKDIR /app
+ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org/
+ENV NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY}
+ENV NPM_CONFIG_FETCH_RETRIES=5
+ENV NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000
+ENV NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000
 
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
@@ -17,6 +22,11 @@ FROM node:22-alpine AS runtime
 
 ENV NODE_ENV=production
 WORKDIR /app
+ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org/
+ENV NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY}
+ENV NPM_CONFIG_FETCH_RETRIES=5
+ENV NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000
+ENV NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000
 
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
