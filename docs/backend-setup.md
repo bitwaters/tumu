@@ -13,6 +13,7 @@
 - `npm run infra:up`：启动 PostgreSQL、Redis、MinIO、API 和 Web。
 - `npm run infra:down`：停止本地基础设施。
 - `npm run prod:init-env -- --host 10.0.0.8`：生成 `.env.production`，写入随机生产密钥和 host 派生的公开访问地址；已有文件默认不会被覆盖。
+- `npm run prod:deploy -- --host 10.0.0.8`：一键执行生产 env 初始化、预检查、镜像构建、Compose 启动、数据库迁移、状态检查和烟测；已有 `.env.production` 时会复用现有配置。
 - `npm run prod:preflight`：读取 `.env.production` 并验证生产部署必填项、密钥、备份目录和 Compose 配置。
 - `npm run prod:build`：构建生产 API/Web 镜像。
 - `npm run prod:migrate`：对生产数据库执行 Prisma migrations，不写入演示 seed。
