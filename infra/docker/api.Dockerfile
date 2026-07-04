@@ -14,6 +14,7 @@ COPY apps/web/package.json apps/web/package.json
 RUN npm config get registry \
   && npm ci --include-workspace-root
 
+COPY apps/api/prisma.config.ts apps/api/prisma.config.ts
 COPY apps/api/prisma apps/api/prisma
 RUN npm --workspace @site-management/api run prisma:generate
 
@@ -34,6 +35,7 @@ ENV NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
+COPY apps/api/prisma.config.ts apps/api/prisma.config.ts
 COPY apps/api/prisma apps/api/prisma
 RUN npm config get registry \
   && npm ci --workspace @site-management/api --include-workspace-root --omit=dev --ignore-scripts \
