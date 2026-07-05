@@ -129,6 +129,9 @@ export interface SiteItemRecord {
   voidedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  _count?: {
+    photos: number;
+  };
 }
 
 export interface PhotoAttachmentRecord {
@@ -185,7 +188,8 @@ export function mapSiteItemRecord(record: SiteItemRecord): SiteItem {
     reopenedAt: record.reopenedAt?.toISOString(),
     voidedAt: record.voidedAt?.toISOString(),
     createdAt: record.createdAt.toISOString(),
-    updatedAt: record.updatedAt.toISOString()
+    updatedAt: record.updatedAt.toISOString(),
+    photoCount: record._count?.photos
   };
 }
 

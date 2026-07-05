@@ -27,10 +27,13 @@ declare module "node:http" {
 declare module "node:crypto" {
   export interface BinaryLike {}
   export function createHash(algorithm: string): {
-    update(data: string): { digest(encoding: "hex" | "base64url"): string };
+    update(data: string | Uint8Array): { digest(encoding: "hex" | "base64url"): string };
   };
-  export function createHmac(algorithm: string, key: string): {
-    update(data: string): { digest(encoding: "base64url" | "hex"): string };
+  export function createHmac(algorithm: string, key: string | Uint8Array): {
+    update(data: string): {
+      digest(): Uint8Array;
+      digest(encoding: "base64url" | "hex"): string;
+    };
   };
   export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean;
   export function randomBytes(size: number): Uint8Array & { toString(encoding?: string): string };

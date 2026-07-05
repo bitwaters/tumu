@@ -14,6 +14,7 @@ export interface ApiRequest {
   headers: IncomingMessage["headers"];
   body: unknown;
   rawBody: string;
+  rawBuffer: Uint8Array;
   context?: RequestContext;
 }
 
@@ -60,24 +61,41 @@ export class Router {
   }
 }
 
-function readBody(request: IncomingMessage): Promise<{ rawBody: string; body: unknown }> {
+function readBody(request: IncomingMessage): Promise<{ rawBody: string; rawBuffer: Uint8Array; body: unknown }> {
   return new Promise((resolve, reject) => {
     const chunks: Uint8Array[] = [];
     request.on("data", (chunk) => chunks.push(chunk));
     request.on("error", reject);
     request.on("end", () => {
-      const rawBody = chunks.map((chunk) => Buffer.from(chunk as unknown as string).toString()).join("");
+      const rawBuffer = concatChunks(chunks);
+      const rawBody = Buffer.from(rawBuffer).toString();
       if (!rawBody) {
-        resolve({ rawBody, body: undefined });
+        resolve({ rawBody, rawBuffer, body: undefined });
+        return;
+      }
+      const contentType = Array.isArray(request.headers["content-type"]) ? request.headers["content-type"][0] : request.headers["content-type"];
+      if (!contentType?.includes("application/json")) {
+        resolve({ rawBody, rawBuffer, body: undefined });
         return;
       }
       try {
-        resolve({ rawBody, body: JSON.parse(rawBody) });
+        resolve({ rawBody, rawBuffer, body: JSON.parse(rawBody) });
       } catch {
         reject(badRequest("Invalid JSON body"));
       }
     });
   });
+}
+
+function concatChunks(chunks: Uint8Array[]): Uint8Array {
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const buffer = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    buffer.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return buffer;
 }
 
 export function authenticate(request: ApiRequest, store: Store, config: ApiConfig): RequestContext {
@@ -116,7 +134,7 @@ export function createHttpServer(router: Router, config: ApiConfig) {
       const url = new URL(incoming.url ?? "/", `http://${incoming.headers.host ?? "127.0.0.1"}`);
       const matched = router.match(method, url.pathname);
       if (!matched) throw notFound(`No route for ${method} ${url.pathname}`);
-      const { rawBody, body } = await readBody(incoming);
+      const { rawBody, rawBuffer, body } = await readBody(incoming);
       const apiRequest: ApiRequest = {
         method,
         path: url.pathname,
@@ -124,7 +142,8 @@ export function createHttpServer(router: Router, config: ApiConfig) {
         query: url.searchParams,
         headers: incoming.headers,
         body,
-        rawBody
+        rawBody,
+        rawBuffer
       };
       const result = await matched.route.handler(apiRequest);
       writeJson(response, 200, { data: result ?? null }, config.corsAllowedOrigin);
@@ -161,7 +180,7 @@ export function writeJson(response: JsonResponseTarget, status: number, body: un
 
 export function setCorsHeaders(response: Pick<ServerResponse, "setHeader">, corsAllowedOrigin: string): void {
   response.setHeader("access-control-allow-origin", corsAllowedOrigin);
-  response.setHeader("access-control-allow-methods", "GET,POST,PATCH,DELETE,OPTIONS");
+  response.setHeader("access-control-allow-methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
   response.setHeader("access-control-allow-headers", "authorization,content-type,idempotency-key");
 }
 

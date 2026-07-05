@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { ApiClient, ApiError } from "./api/client";
 import { DrawingsApi, type DrawingWithCurrentRevision } from "./api/drawings";
 import { ExportsApi, type ExportDownload } from "./api/exports";
@@ -9,6 +9,7 @@ import { IdempotencyKeyStore } from "./api/idempotency";
 import { MasterDataApi, type MasterDataKind, type MasterDataPayload, type MasterDataRecord, type MasterDataWriteInput } from "./api/masterData";
 import { NotificationsApi } from "./api/notifications";
 import { PhotosApi, type PhotoCompleteInput, type PhotoListQuery } from "./api/photos";
+import { SettingsApi, type SystemSettings, type SystemSettingsUpdateInput } from "./api/settings";
 import { SiteItemsApi, flattenGroupedPhotos, type CreateSiteItemInput, type SiteItemDetailPayload, type SiteItemListQuery, type SiteItemWorkflowInput, type UpdateSiteItemInput } from "./api/siteItems";
 import { clearStoredToken, readStoredToken, saveStoredToken } from "./api/session";
 import { UsersApi, type UserWriteInput } from "./api/users";
@@ -112,12 +113,28 @@ const emptyDirectory: DirectoryData = {
   users: []
 };
 
+const defaultSystemSettings: SystemSettings = {
+  objectStorage: {
+    endpoint: "",
+    bucket: "",
+    accessKeyConfigured: false,
+    secretKeyConfigured: false
+  },
+  uploads: {
+    maxBytes: 10 * 1024 * 1024
+  },
+  features: {
+    objectStorageEditable: false,
+    backupsManagedExternally: true
+  }
+};
+
 const mobileTabs: Array<RoleScopedTab<MobileRoute> & { icon: string }> = [
   { id: "todo", label: "待办", icon: "□" },
   { id: "items", label: "事项", icon: "≡" },
   { id: "photo", label: "拍照", icon: "+" },
   { id: "dashboard", label: "看板", icon: "▦", roles: ["admin", "supervisor", "contractor_manager"] },
-  { id: "profile", label: "我的", icon: "●" }
+  { id: "profile", label: "设置", icon: "●" }
 ];
 
 const desktopTabs: Array<RoleScopedTab<DesktopRoute>> = [
@@ -130,7 +147,7 @@ const desktopTabs: Array<RoleScopedTab<DesktopRoute>> = [
   { id: "users", label: "用户与权限", roles: ["admin"] },
   { id: "exports", label: "导入导出", roles: ["admin", "supervisor", "contractor_manager"] },
   { id: "audit", label: "审计日志", roles: ["admin"] },
-  { id: "profile", label: "我的工作台" }
+  { id: "profile", label: "设置" }
 ];
 
 function uniqueId(prefix: string) {
@@ -201,6 +218,10 @@ function siteItemListQuery(filters?: ItemFilterValues, search?: string): SiteIte
   return query;
 }
 
+function visiblePhotoCount(item: SiteItem, photos: PhotoAttachment[]): number {
+  return item.photoCount ?? itemPhotos(item.id, photos).length;
+}
+
 function scopedItems(state: AppState, user: User) {
   return state.runtimeConfig.useMocks ? visibleItems(user, state.items) : state.items;
 }
@@ -218,8 +239,48 @@ function directoryItem<T extends { id: string }>(items: T[], id?: string): T | u
   return items.find((item) => item.id === id);
 }
 
+function directorySections(directory: DirectoryData): Section[] {
+  return directory.sections.length ? directory.sections : sections;
+}
+
+function directoryAreas(directory: DirectoryData): Area[] {
+  return directory.areas.length ? directory.areas : areas;
+}
+
+function directoryDisciplines(directory: DirectoryData): Discipline[] {
+  return directory.disciplines.length ? directory.disciplines : disciplines;
+}
+
+function directoryOrganizations(directory: DirectoryData): Organization[] {
+  return directory.organizations.length ? directory.organizations : organizations;
+}
+
+function directoryUsers(directory: DirectoryData): User[] {
+  return directory.users.length ? directory.users : users;
+}
+
+function sectionName(directory: DirectoryData, id?: string): string {
+  return directoryItem(directorySections(directory), id)?.name ?? getSection(id)?.name ?? "-";
+}
+
+function areaName(directory: DirectoryData, id?: string): string {
+  return directoryItem(directoryAreas(directory), id)?.name ?? getArea(id)?.name ?? "-";
+}
+
+function disciplineName(directory: DirectoryData, id?: string): string {
+  return directoryItem(directoryDisciplines(directory), id)?.name ?? getDiscipline(id)?.name ?? "-";
+}
+
+function organizationName(directory: DirectoryData, id?: string): string {
+  return directoryItem(directoryOrganizations(directory), id)?.name ?? getOrganization(id)?.name ?? "待责任工程师派发";
+}
+
+function userName(directory: DirectoryData, id?: string): string {
+  return directoryItem(directoryUsers(directory), id)?.name ?? getUser(id)?.name ?? "未知用户";
+}
+
 function ownerCandidatesForDirectory(directory: DirectoryData, sectionId?: string) {
-  const candidates = directory.users.filter(
+  const candidates = directoryUsers(directory).filter(
     (user) =>
       user.isActive &&
       (user.role === "supervisor" || user.role === "admin") &&
@@ -232,7 +293,7 @@ function ownerCandidatesForDirectory(directory: DirectoryData, sectionId?: strin
 }
 
 function activeRectifiersForDirectory(directory: DirectoryData, organizationId: string, sectionId?: string) {
-  return directory.users.filter(
+  return directoryUsers(directory).filter(
     (user) =>
       user.role === "rectifier" &&
       user.organizationId === organizationId &&
@@ -296,6 +357,7 @@ function useAppState() {
   const masterDataApi = useMemo(() => new MasterDataApi(apiClient), [apiClient]);
   const siteItemsApi = useMemo(() => new SiteItemsApi(apiClient), [apiClient]);
   const photosApi = useMemo(() => new PhotosApi(apiClient), [apiClient]);
+  const settingsApi = useMemo(() => new SettingsApi(apiClient), [apiClient]);
   const notificationsApi = useMemo(() => new NotificationsApi(apiClient), [apiClient]);
   const usersApi = useMemo(() => new UsersApi(apiClient), [apiClient]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -308,6 +370,7 @@ function useAppState() {
   const [photoListState, setPhotoListState] = useState<LoadState>("idle");
   const [notificationState, setNotificationState] = useState<LoadState>("idle");
   const [auditLogState, setAuditLogState] = useState<LoadState>("idle");
+  const [settingsState, setSettingsState] = useState<LoadState>("idle");
   const [directoryState, setDirectoryState] = useState<LoadState>("idle");
   const [drawingListState, setDrawingListState] = useState<LoadState>("idle");
   const [items, setItems] = useState<SiteItem[]>(() => (runtimeConfig.useMocks ? siteItems : []));
@@ -326,6 +389,7 @@ function useAppState() {
   const [drawingPagesByRevision, setDrawingPagesByRevision] = useState<Record<string, DrawingRevisionPage[]>>({});
   const [drawingPreviewUrls, setDrawingPreviewUrls] = useState<Record<string, string>>({});
   const [directory, setDirectory] = useState<DirectoryData>(() => (runtimeConfig.useMocks ? initialDirectory : emptyDirectory));
+  const [systemSettings, setSystemSettings] = useState<SystemSettings>(defaultSystemSettings);
   const [drafts, setDrafts] = useState<DraftItem[]>([]);
   const [activeDraft, setActiveDraft] = useState<DraftItem | null>(null);
   const [uploadQueue, setUploadQueue] = useState<UploadQueueItem[]>([]);
@@ -449,6 +513,58 @@ function useAppState() {
       }
     },
     [auditApi, authStatus, runtimeConfig.useMocks]
+  );
+
+  const refreshSystemSettings = useCallback(async () => {
+    if (runtimeConfig.useMocks || authStatus !== "authenticated") {
+      setSystemSettings(defaultSystemSettings);
+      return;
+    }
+    setSettingsState("loading");
+    try {
+      setSystemSettings(await settingsApi.get());
+      setDataError(null);
+      setSettingsState("idle");
+    } catch (error) {
+      setDataError(errorMessage(error));
+      setSettingsState("error");
+    }
+  }, [authStatus, runtimeConfig.useMocks, settingsApi]);
+
+  const saveSystemSettings = useCallback(
+    async (input: SystemSettingsUpdateInput) => {
+      if (runtimeConfig.useMocks) {
+        setSystemSettings((prev) => ({
+          objectStorage: {
+            endpoint: input.objectStorage?.endpoint ?? prev.objectStorage.endpoint,
+            bucket: input.objectStorage?.bucket ?? prev.objectStorage.bucket,
+            accessKeyConfigured: Boolean(input.objectStorage?.accessKey || prev.objectStorage.accessKeyConfigured),
+            secretKeyConfigured: Boolean(input.objectStorage?.secretKey || prev.objectStorage.secretKeyConfigured)
+          },
+          uploads: {
+            maxBytes: input.uploads?.maxBytes ?? prev.uploads.maxBytes
+          },
+          features: {
+            objectStorageEditable: true,
+            backupsManagedExternally: input.features?.backupsManagedExternally ?? prev.features.backupsManagedExternally
+          }
+        }));
+        setDataError(null);
+        return true;
+      }
+      setSettingsState("loading");
+      try {
+        setSystemSettings(await settingsApi.update(input));
+        setDataError(null);
+        setSettingsState("idle");
+        return true;
+      } catch (error) {
+        setDataError(errorMessage(error));
+        setSettingsState("error");
+        return false;
+      }
+    },
+    [runtimeConfig.useMocks, settingsApi]
   );
 
   const refreshDirectory = useCallback(async () => {
@@ -942,7 +1058,8 @@ function useAppState() {
     void refreshNotifications();
     void refreshDirectory();
     void refreshDrawings();
-  }, [authStatus, currentUser?.id, refreshDirectory, refreshDrawings, refreshNotifications, refreshPhotos, refreshSiteItems, runtimeConfig.useMocks]);
+    void refreshSystemSettings();
+  }, [authStatus, currentUser?.id, refreshDirectory, refreshDrawings, refreshNotifications, refreshPhotos, refreshSiteItems, refreshSystemSettings, runtimeConfig.useMocks]);
 
   function runOnce(key: string, action: () => void) {
     if (idempotencyGuard(idempotencyKeys.current, key)) action();
@@ -1184,10 +1301,10 @@ function useAppState() {
       ...photo,
       siteItemId: item.id,
       stage,
-      sectionSnapshot: getSection(item.sectionId)?.name || "-",
-      areaSnapshot: getArea(item.areaId)?.name || "-",
-      disciplineSnapshot: getDiscipline(item.disciplineId)?.name || "-",
-      responsibleOrgSnapshot: getOrganization(item.responsibleOrgId)?.name || "待责任工程师派发"
+      sectionSnapshot: sectionName(directory, item.sectionId),
+      areaSnapshot: areaName(directory, item.areaId),
+      disciplineSnapshot: disciplineName(directory, item.disciplineId),
+      responsibleOrgSnapshot: organizationName(directory, item.responsibleOrgId)
     };
   }
 
@@ -1223,10 +1340,10 @@ function useAppState() {
       ...base,
       siteItemId: item.id,
       stage: upload.stage,
-      sectionSnapshot: getSection(item.sectionId)?.name || "-",
-      areaSnapshot: getArea(item.areaId)?.name || "-",
-      disciplineSnapshot: getDiscipline(item.disciplineId)?.name || "-",
-      responsibleOrgSnapshot: getOrganization(item.responsibleOrgId)?.name || "待责任工程师派发"
+      sectionSnapshot: sectionName(directory, item.sectionId),
+      areaSnapshot: areaName(directory, item.areaId),
+      disciplineSnapshot: disciplineName(directory, item.disciplineId),
+      responsibleOrgSnapshot: organizationName(directory, item.responsibleOrgId)
     };
   }
 
@@ -1280,10 +1397,15 @@ function useAppState() {
       const presign = await photosApi.presign({ fileName: upload.fileName, mimeType, sizeBytes });
       objectKey = presign.objectKey;
       setUploadQueue((prev) => prev.map((item) => (item.id === upload.id ? { ...item, objectKey } : item)));
-      const response = await fetch(presign.uploadUrl, {
+      const uploadUrl = presign.uploadUrl.startsWith("/") ? `${runtimeConfig.apiBaseUrl}${presign.uploadUrl}` : presign.uploadUrl;
+      const token = readStoredToken();
+      const response = await fetch(uploadUrl, {
         method: "PUT",
         body: upload.file,
-        headers: { "Content-Type": mimeType }
+        headers: {
+          "Content-Type": mimeType,
+          ...(token ? { authorization: `Bearer ${token}` } : {})
+        }
       });
       if (!response.ok) throw new Error("对象存储上传失败");
     }
@@ -1400,6 +1522,7 @@ function useAppState() {
     drawingPagesByRevision,
     drawingPreviewUrls,
     directory,
+    systemSettings,
     drafts,
     setDrafts,
     activeDraft,
@@ -1419,6 +1542,8 @@ function useAppState() {
     refreshExportJob,
     createImportJob,
     refreshDirectory,
+    refreshSystemSettings,
+    saveSystemSettings,
     createMasterData,
     updateMasterData,
     createUser,
@@ -1434,6 +1559,7 @@ function useAppState() {
     photoListState,
     notificationState,
     auditLogState,
+    settingsState,
     directoryState,
     drawingListState,
     dataError,
@@ -1478,7 +1604,7 @@ function AuthLoadingPage({ config }: { config: FrontendRuntimeConfig }) {
       <section className="login-panel">
         <span className="product-mark">POWER SITE</span>
         <h1>正在恢复登录</h1>
-        <p>{config.useMocks ? "正在进入原型模式。" : `正在连接 ${config.apiBaseUrl}`}</p>
+        <p>{config.useMocks ? "正在进入原型模式。" : "正在恢复工作台。"}</p>
       </section>
     </main>
   );
@@ -1486,7 +1612,7 @@ function AuthLoadingPage({ config }: { config: FrontendRuntimeConfig }) {
 
 function LoginPage({ state }: { state: AppState }) {
   const [selected, setSelected] = useState(users[1].id);
-  const [username, setUsername] = useState("wang.supervisor");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const isMockMode = state.runtimeConfig.useMocks;
   return (
@@ -1495,7 +1621,7 @@ function LoginPage({ state }: { state: AppState }) {
         <div>
           <span className="product-mark">POWER SITE</span>
           <h1>发电站现场管理</h1>
-          <p>{isMockMode ? "尾工与缺陷闭环、现场照片和整改看板的前端原型。" : "连接现场管理 API，进入真实数据工作台。"}</p>
+          <p>{isMockMode ? "尾工与缺陷闭环、现场照片和整改看板的前端原型。" : "现场尾工、缺陷和照片闭环管理。"}</p>
         </div>
         {isMockMode ? (
           <>
@@ -1528,7 +1654,6 @@ function LoginPage({ state }: { state: AppState }) {
             <Button disabled={state.authStatus === "checking" || !username || !password} onClick={() => void state.login(username, password)}>
               登录
             </Button>
-            <p className="muted">API：{state.runtimeConfig.apiBaseUrl}</p>
           </>
         )}
       </section>
@@ -1548,7 +1673,7 @@ function Shell({ state, user }: { state: AppState; user: User }) {
         <header className="mobile-topbar">
           <div>
             <strong>现场闭环</strong>
-            <span>{getOrganization(user.organizationId)?.name}</span>
+            <span>{organizationName(state.directory, user.organizationId)}</span>
           </div>
           <IconButton label="通知" onClick={() => state.setShowNotifications(true)}>
             {unreadCount ? <span className="badge">{unreadCount}</span> : null}!
@@ -1629,7 +1754,7 @@ function renderMobileRoute(state: AppState, user: User) {
   if (route === "items") return <ItemListPage state={state} user={user} />;
   if (route === "photo") return <PhotoPage state={state} />;
   if (route === "dashboard") return <MobileDashboard state={state} user={user} />;
-  return <ProfilePage state={state} user={user} />;
+  return <SettingsPage state={state} user={user} />;
 }
 
 function renderDesktopRoute(state: AppState, user: User) {
@@ -1658,7 +1783,7 @@ function renderDesktopRoute(state: AppState, user: User) {
   if (route === "master") return <MasterDataPage state={state} />;
   if (route === "users") return <UsersPage state={state} />;
   if (route === "exports") return <ExportsPage state={state} user={user} />;
-  if (route === "profile") return <ProfilePage state={state} user={user} />;
+  if (route === "profile") return <SettingsPage state={state} user={user} />;
   return <AuditPage state={state} />;
 }
 
@@ -1686,8 +1811,9 @@ function TodoPage({ state, user }: { state: AppState; user: User }) {
       {todoItems.map((item) => (
         <ItemCard
           key={item.id}
+          state={state}
           item={item}
-          photoCount={itemPhotos(item.id, state.photos).length}
+          photoCount={visiblePhotoCount(item, state.photos)}
           onClick={() => state.setSelectedItemId(item.id)}
         />
       ))}
@@ -1715,10 +1841,10 @@ function ItemListPage({ state, user }: { state: AppState; user: User }) {
     const text = [
       item.itemNo,
       item.title,
-      getSection(item.sectionId)?.name,
-      getArea(item.areaId)?.name,
-      getDiscipline(item.disciplineId)?.name,
-      getOrganization(item.responsibleOrgId)?.name
+      sectionName(state.directory, item.sectionId),
+      areaName(state.directory, item.areaId),
+      disciplineName(state.directory, item.disciplineId),
+      organizationName(state.directory, item.responsibleOrgId)
     ].join("");
     return matchesItemFilter(filters, item, user, state) && (state.runtimeConfig.useMocks ? text.includes(query) : true);
   });
@@ -1751,8 +1877,9 @@ function ItemListPage({ state, user }: { state: AppState; user: User }) {
       {filtered.map((item) => (
         <ItemCard
           key={item.id}
+          state={state}
           item={item}
-          photoCount={itemPhotos(item.id, state.photos).length}
+          photoCount={visiblePhotoCount(item, state.photos)}
           onClick={() => state.setSelectedItemId(item.id)}
         />
       ))}
@@ -1783,7 +1910,7 @@ function matchesItemFilter(filters: ItemFilterValues, item: SiteItem, user: User
   return true;
 }
 
-function ItemCard({ item, photoCount, onClick }: { item: SiteItem; photoCount: number; onClick: () => void }) {
+function ItemCard({ state, item, photoCount, onClick }: { state: AppState; item: SiteItem; photoCount: number; onClick: () => void }) {
   return (
     <Card className="item-card">
       <button onClick={onClick} className="card-button">
@@ -1797,8 +1924,8 @@ function ItemCard({ item, photoCount, onClick }: { item: SiteItem; photoCount: n
         <h3>{item.title}</h3>
         <p>{item.itemNo} · {typeText[item.type]}</p>
         <dl className="item-meta">
-          <div><dt>位置</dt><dd>{getArea(item.areaId)?.name} / {getDiscipline(item.disciplineId)?.name}</dd></div>
-          <div><dt>责任</dt><dd>{getOrganization(item.responsibleOrgId)?.name || "待责任工程师派发"}</dd></div>
+          <div><dt>位置</dt><dd>{areaName(state.directory, item.areaId)} / {disciplineName(state.directory, item.disciplineId)}</dd></div>
+          <div><dt>责任</dt><dd>{organizationName(state.directory, item.responsibleOrgId)}</dd></div>
           <div><dt>截止</dt><dd>{formatDate(item.dueAt)}</dd></div>
           <div><dt>照片</dt><dd>{photoCount} 张</dd></div>
         </dl>
@@ -1942,9 +2069,7 @@ function CreateItemPage({ state, onBack }: { state: AppState; onBack: () => void
           <div className="photo-grid compact-photo-grid">
             {selectedPhotos.map((photo) => (
               <div key={photo.id} className="photo-tile selectable-photo selected">
-                <div className="photo-thumb">photo</div>
-                <strong>{photo.fileName}</strong>
-                <span>已选择为发现照片</span>
+                <PhotoThumb state={state} photo={photo} label="照片" onClick={() => setPreviewPhoto(photo)} />
                 <div className="action-row">
                   <Button variant="secondary" onClick={() => setPreviewPhoto(photo)}>预览</Button>
                   <Button variant="ghost" onClick={() => togglePhoto(photo.id)}>移除</Button>
@@ -1978,6 +2103,29 @@ function CreateItemPage({ state, onBack }: { state: AppState; onBack: () => void
   );
 }
 
+function PhotoThumb({
+  state,
+  photo,
+  label,
+  onClick
+}: {
+  state: AppState;
+  photo: PhotoAttachment;
+  label: string;
+  onClick: () => void;
+}) {
+  const previewUrl = state.photoPreviewUrls[photo.id];
+  useEffect(() => {
+    if (!previewUrl) void state.loadPhotoPreview(photo.id);
+  }, [photo.id, previewUrl, state.loadPhotoPreview]);
+
+  return (
+    <button type="button" className="photo-thumb photo-thumb-button" onClick={onClick} aria-label={`预览 ${photo.fileName}`}>
+      {previewUrl ? <img src={previewUrl} alt="" /> : <span>{label}</span>}
+    </button>
+  );
+}
+
 function PhotoPickerPage({
   state,
   title,
@@ -2002,7 +2150,7 @@ function PhotoPickerPage({
     const haystack = [
       photo.fileName,
       formatDate(photo.uploadedAt),
-      getUser(photo.uploadedBy)?.name,
+      userName(state.directory, photo.uploadedBy),
       photo.areaSnapshot,
       photo.disciplineSnapshot,
       photo.responsibleOrgSnapshot
@@ -2029,10 +2177,7 @@ function PhotoPickerPage({
           const selected = selectedPhotoIds.includes(photo.id);
           return (
             <div key={photo.id} className={`photo-tile selectable-photo ${selected ? "selected" : ""}`}>
-              <div className="photo-thumb">photo</div>
-              <strong>{photo.fileName}</strong>
-              <span>{formatDate(photo.uploadedAt)} · {getUser(photo.uploadedBy)?.name || "未知上传人"}</span>
-              <span>{selected ? "已选择" : "未选择"}</span>
+              <PhotoThumb state={state} photo={photo} label="照片" onClick={() => setPreviewPhoto(photo)} />
               <div className="action-row">
                 <Button variant="secondary" onClick={() => setPreviewPhoto(photo)}>预览</Button>
                 <Button onClick={() => onToggle(photo.id)}>{selected ? "取消选择" : "选择"}</Button>
@@ -2151,7 +2296,15 @@ function ItemDetailPage({ state, user, item }: { state: AppState; user: User; it
   }
   return (
     <div className="stack item-detail-page">
-      <PageHeader title={item.itemNo} meta={item.title} action={<Button variant="ghost" onClick={() => state.setSelectedItemId(null)}>返回</Button>} />
+      <header className="page-header item-detail-header">
+        <div className="item-detail-title">
+          <h1>{item.itemNo}</h1>
+          <strong>{item.title}</strong>
+        </div>
+        <div className="page-action">
+          <Button variant="ghost" onClick={() => state.setSelectedItemId(null)}>返回</Button>
+        </div>
+      </header>
       <div className="detail-layout">
         <div className="detail-main">
           <Card className="detail-summary-card">
@@ -2159,32 +2312,40 @@ function ItemDetailPage({ state, user, item }: { state: AppState; user: User; it
               <ItemEditForm item={item} state={state} user={user} onCancel={() => setIsEditing(false)} onSaved={() => setIsEditing(false)} />
             ) : (
               <>
-                <div className="detail-head">
-                  <StatusTag status={item.status} />
-                  <TimingTag overdue={isOverdue(item)} dueSoon={isDueSoon(item)} />
-                  <SeverityTag severity={item.severity} />
-                  <span>{typeText[item.type]}</span>
+                <div className="detail-summary-top">
+                  <div className="detail-head">
+                    <StatusTag status={item.status} />
+                    <TimingTag overdue={isOverdue(item)} dueSoon={isDueSoon(item)} />
+                    <SeverityTag severity={item.severity} />
+                    <span className="tag tag-neutral">{typeText[item.type]}</span>
+                  </div>
                   {canEdit ? <Button variant="secondary" onClick={() => setIsEditing(true)}>编辑事项</Button> : null}
                 </div>
                 <div className="detail-description">
                   <span>问题描述</span>
                   <p>{item.description || "暂无描述"}</p>
                 </div>
-                <dl className="detail-grid">
-                  <div><dt>标段</dt><dd>{getSection(item.sectionId)?.name}</dd></div>
-                  <div><dt>区域</dt><dd>{getArea(item.areaId)?.name}</dd></div>
-                  <div><dt>专业</dt><dd>{getDiscipline(item.disciplineId)?.name}</dd></div>
-                  <div><dt>提出人</dt><dd>{getUser(item.createdBy)?.name}</dd></div>
-                  <div><dt>责任工程师</dt><dd>{getUser(item.ownerUserId)?.name}</dd></div>
-                  <div><dt>责任单位</dt><dd>{getOrganization(item.responsibleOrgId)?.name || "待责任工程师派发"}</dd></div>
-                  <div><dt>责任人</dt><dd>{getUser(item.responsibleUserId)?.name || "待分配"}</dd></div>
+                <dl className="detail-grid detail-meta-grid">
+                  <div><dt>标段</dt><dd>{sectionName(state.directory, item.sectionId)}</dd></div>
+                  <div><dt>区域</dt><dd>{areaName(state.directory, item.areaId)}</dd></div>
+                  <div><dt>专业</dt><dd>{disciplineName(state.directory, item.disciplineId)}</dd></div>
+                  <div><dt>提出人</dt><dd>{userName(state.directory, item.createdBy)}</dd></div>
+                  <div><dt>责任工程师</dt><dd>{userName(state.directory, item.ownerUserId)}</dd></div>
+                  <div><dt>责任单位</dt><dd>{organizationName(state.directory, item.responsibleOrgId)}</dd></div>
+                  <div><dt>责任人</dt><dd>{item.responsibleUserId ? userName(state.directory, item.responsibleUserId) : "待分配"}</dd></div>
                   <div><dt>截止</dt><dd>{formatDate(item.dueAt)}</dd></div>
                 </dl>
               </>
             )}
           </Card>
           <Card className="photo-evidence-card">
-            <h3>照片证据</h3>
+            <div className="card-title-row">
+              <div>
+                <h3>照片证据</h3>
+                <p className="muted">发现、整改、复验照片按阶段归档。</p>
+              </div>
+              <span className="photo-count-summary">{photosForItem.length} 张照片</span>
+            </div>
             {state.itemDetailState === "loading" ? <p className="muted">正在刷新详情...</p> : null}
             {state.itemDetailState === "error" && state.dataError ? <p className="error-text">{state.dataError}</p> : null}
             <div className="photo-evidence-groups">
@@ -2192,14 +2353,11 @@ function ItemDetailPage({ state, user, item }: { state: AppState; user: User; it
                 <div key={group.stage} className="photo-stage-group">
                   <div className="card-title-row">
                     <h4>{photoStageLabel(group.stage)}照片</h4>
-                    <span className="muted">{group.photos.length} 张</span>
                   </div>
                   <div className="photo-grid">
                     {group.photos.map((photo) => (
                       <div key={photo.id} className="photo-tile">
-                        <div className="photo-thumb">{photoStageLabel(photo.stage)}</div>
-                        <strong>{photo.fileName}</strong>
-                        <span>{photo.areaSnapshot} · {photo.responsibleOrgSnapshot}</span>
+                        <PhotoThumb state={state} photo={photo} label={photoStageLabel(photo.stage)} onClick={() => setPreviewPhoto(photo)} />
                         <Button variant="secondary" onClick={() => setPreviewPhoto(photo)}>预览</Button>
                       </div>
                     ))}
@@ -2211,38 +2369,9 @@ function ItemDetailPage({ state, user, item }: { state: AppState; user: User; it
           </Card>
         </div>
         <aside className="detail-side">
-          <Card className="communication-card">
-            <h3>现场沟通</h3>
-            {canComment ? (
-              <div className="workflow-comment-action">
-                {!isCommenting ? (
-                  <Button variant="secondary" onClick={() => setIsCommenting(true)}>新增评论</Button>
-                ) : (
-                  <>
-                    <TextArea
-                      value={commentText}
-                      onChange={(event) => setCommentText(event.target.value)}
-                      placeholder="输入现场说明、整改沟通或复验意见"
-                    />
-                    <div className="action-row wrap">
-                      <Button variant="secondary" onClick={() => {
-                        setCommentText("");
-                        setIsCommenting(false);
-                      }}>
-                        取消
-                      </Button>
-                      <Button disabled={!commentText.trim()} onClick={submitComment}>提交评论</Button>
-                    </div>
-                  </>
-                )}
-              </div>
-            ) : (
-              <p className="muted">当前角色暂无评论权限。</p>
-            )}
-          </Card>
           <Card className="workflow-card">
             <h3>流程处理</h3>
-            <div className="action-row wrap">
+            <div className="workflow-action-list">
               {workflowActions.map((action) =>
                 action === "assign_rectifier" ? (
                   <AssignRectifier key={action} item={item} state={state} />
@@ -2260,9 +2389,7 @@ function ItemDetailPage({ state, user, item }: { state: AppState; user: User; it
                       <div className="photo-grid compact-photo-grid">
                         {selectedReviewPhotos.map((photo) => (
                           <div key={photo.id} className="photo-tile selectable-photo selected">
-                            <div className="photo-thumb">整改</div>
-                            <strong>{photo.fileName}</strong>
-                            <span>将作为整改照片提交</span>
+                            <PhotoThumb state={state} photo={photo} label="整改" onClick={() => setPreviewPhoto(photo)} />
                             <div className="action-row">
                               <Button variant="secondary" onClick={() => setPreviewPhoto(photo)}>预览</Button>
                               <Button variant="ghost" onClick={() => toggleReviewPhoto(photo.id)}>移除</Button>
@@ -2300,9 +2427,7 @@ function ItemDetailPage({ state, user, item }: { state: AppState; user: User; it
                       <div className="photo-grid compact-photo-grid">
                         {selectedClosePhotos.map((photo) => (
                           <div key={photo.id} className="photo-tile selectable-photo selected">
-                            <div className="photo-thumb">复验</div>
-                            <strong>{photo.fileName}</strong>
-                            <span>将作为复验照片归档</span>
+                            <PhotoThumb state={state} photo={photo} label="复验" onClick={() => setPreviewPhoto(photo)} />
                             <div className="action-row">
                               <Button variant="secondary" onClick={() => setPreviewPhoto(photo)}>预览</Button>
                               <Button variant="ghost" onClick={() => toggleClosePhoto(photo.id)}>移除</Button>
@@ -2324,13 +2449,46 @@ function ItemDetailPage({ state, user, item }: { state: AppState; user: User; it
               {!workflowActions.length ? <span className="muted">当前没有可执行流程动作</span> : null}
             </div>
           </Card>
+          <Card className="communication-card">
+            <h3>现场沟通</h3>
+            {canComment ? (
+              <div className="workflow-comment-action">
+                {!isCommenting ? (
+                  <Button variant="secondary" onClick={() => setIsCommenting(true)}>新增评论</Button>
+                ) : (
+                  <>
+                    <TextArea
+                      value={commentText}
+                      onChange={(event) => setCommentText(event.target.value)}
+                      placeholder="输入现场说明、整改沟通或复验意见"
+                    />
+                    <div className="action-row wrap">
+                      <Button variant="secondary" onClick={() => {
+                        setCommentText("");
+                        setIsCommenting(false);
+                      }}>
+                        取消
+                      </Button>
+                      <Button disabled={!commentText.trim()} onClick={submitComment}>提交评论</Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <p className="muted">当前角色暂无评论权限。</p>
+            )}
+          </Card>
           <Card className="log-card">
             <h3>流程日志</h3>
             <ol className="timeline">
               {itemLogs(item.id, state.logs).map((log) => (
                 <li key={log.id}>
-                  <strong>{actionLabel(log.action)}</strong>
-                  <span>{log.comment} · {getUser(log.actorId)?.name} · {formatDate(log.createdAt)}</span>
+                  <div className="timeline-row">
+                    <strong>{actionLabel(log.action)}</strong>
+                    <span>{formatDate(log.createdAt)}</span>
+                  </div>
+                  <p className="timeline-comment">{log.comment || "无备注"}</p>
+                  <span className="timeline-meta">{userName(state.directory, log.actorId)}</span>
                 </li>
               ))}
             </ol>
@@ -2439,6 +2597,72 @@ function ItemEditForm({
   );
 }
 
+function WorkflowOptionSelect({
+  value,
+  options,
+  placeholder,
+  onChange
+}: {
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  placeholder: string;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const selected = options.find((option) => option.value === value);
+  useEffect(() => {
+    if (!open) return undefined;
+    function closeOnPointerDown(event: PointerEvent) {
+      const target = event.target instanceof Node ? event.target : null;
+      if (target && !rootRef.current?.contains(target)) setOpen(false);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", closeOnPointerDown);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+  return (
+    <div className="workflow-select" ref={rootRef}>
+      <button
+        type="button"
+        className={`input workflow-select-button ${open ? "open" : ""}`}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        disabled={!options.length}
+        onClick={() => setOpen((prev) => !prev)}
+      >
+        <span>{selected?.label || placeholder}</span>
+        <span aria-hidden="true">v</span>
+      </button>
+      {open ? (
+        <div className="workflow-select-menu" role="listbox">
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`workflow-select-option ${option.value === value ? "active" : ""}`}
+              role="option"
+              aria-selected={option.value === value}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function DispatchItem({ item, state }: { item: SiteItem; state: AppState }) {
   const contractorOrgs = state.directory.organizations.filter((organization) => organization.type === "contractor" && organization.isActive);
   const [organizationId, setOrganizationId] = useState(item.responsibleOrgId || contractorOrgs[0]?.id || "");
@@ -2447,10 +2671,13 @@ function DispatchItem({ item, state }: { item: SiteItem; state: AppState }) {
     if (!organizationId && contractorOrgs[0]?.id) setOrganizationId(contractorOrgs[0].id);
   }, [contractorOrgs, organizationId]);
   return (
-    <div className="inline-form">
-      <Select value={organizationId} onChange={(event) => setOrganizationId(event.target.value)}>
-        {contractorOrgs.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}
-      </Select>
+    <div className="workflow-inline-form">
+      <WorkflowOptionSelect
+        value={organizationId}
+        options={contractorOrgs.map((organization) => ({ value: organization.id, label: organization.name }))}
+        placeholder="选择责任单位"
+        onChange={setOrganizationId}
+      />
       <Button
         variant="secondary"
         disabled={!organizationId}
@@ -2469,10 +2696,13 @@ function AssignRectifier({ item, state }: { item: SiteItem; state: AppState }) {
     if (!userId && candidates[0]?.id) setUserId(candidates[0].id);
   }, [candidates, userId]);
   return (
-    <div className="inline-form">
-      <Select value={userId} onChange={(event) => setUserId(event.target.value)}>
-        {candidates.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}
-      </Select>
+    <div className="workflow-inline-form">
+      <WorkflowOptionSelect
+        value={userId}
+        options={candidates.map((user) => ({ value: user.id, label: user.name }))}
+        placeholder="选择整改人"
+        onChange={setUserId}
+      />
       <Button
         variant="secondary"
         disabled={!userId}
@@ -2545,17 +2775,14 @@ function PhotoPage({ state }: { state: AppState }) {
         ))}
         {!visibleUploads.length ? <p className="muted">暂无待上传照片。</p> : null}
       </Card>
-      <Card>
+      <Card className="photo-gallery-card">
         <h3>照片列表</h3>
         <div className="photo-grid">
           {sortedPhotos.map((photo) => {
             const item = photo.siteItemId ? state.items.find((candidate) => candidate.id === photo.siteItemId) : undefined;
             return (
               <div key={photo.id} className="photo-tile">
-                <div className="photo-thumb">{photo.stage ? photoStageLabel(photo.stage) : "photo"}</div>
-                <strong>{photo.fileName}</strong>
-                <span>{item ? `${item.itemNo} · ${photoStageLabel(photo.stage)}` : "未绑定"}</span>
-                <span>{formatDate(photo.uploadedAt)} · {getUser(photo.uploadedBy)?.name || "未知上传人"}</span>
+                <PhotoThumb state={state} photo={photo} label={photo.stage ? photoStageLabel(photo.stage) : "照片"} onClick={() => setPreviewPhoto(photo)} />
                 <div className="action-row">
                   <Button variant="secondary" onClick={() => setPreviewPhoto(photo)}>预览</Button>
                   {!photo.siteItemId ? <Button variant="ghost" onClick={() => void state.deletePhoto(photo)}>删除</Button> : null}
@@ -2580,15 +2807,15 @@ function PhotoPage({ state }: { state: AppState }) {
 
 function MobileDashboard({ state, user }: { state: AppState; user: User }) {
   const [sectionId, setSectionId] = useState("all");
-  const source = scopedItems(state, user).filter((item) => sectionId === "all" || item.sectionId === sectionId);
+  const source = scopedItems(state, user).filter((item) => item.status !== "voided").filter((item) => sectionId === "all" || item.sectionId === sectionId);
   const summary = summarize(source);
-  const byOrg = countBy(source.filter(isOverdue), (item) => getOrganization(item.responsibleOrgId)?.name);
+  const byOrg = countBy(source.filter(isOverdue), (item) => organizationName(state.directory, item.responsibleOrgId));
   return (
     <div className="stack">
       <PageHeader title="移动看板" meta="手机端关键数字" />
       <Select value={sectionId} onChange={(event) => setSectionId(event.target.value)}>
         <option value="all">全部标段</option>
-        {sections.map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}
+        {directorySections(state.directory).map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}
       </Select>
       <div className="metric-grid">
         <MetricCard label="打开" value={summary.open} />
@@ -2599,37 +2826,139 @@ function MobileDashboard({ state, user }: { state: AppState; user: User }) {
       <Card>
         <h3>超期排行</h3>
         {Object.entries(byOrg).map(([name, count]) => <BarRow key={name} label={name} value={count} max={Math.max(...Object.values(byOrg), 1)} />)}
+        {!Object.keys(byOrg).length ? <p className="muted">暂无超期事项。</p> : null}
       </Card>
     </div>
   );
 }
 
-function ProfilePage({ state, user }: { state: AppState; user: User }) {
+function SettingsPage({ state, user }: { state: AppState; user: User }) {
   const unread = state.notifications.filter((notice) => notice.recipientId === user.id && !notice.readAt).length;
   const userDrafts = state.drafts.filter((draft) => draft.createdBy === user.id);
   return (
-    <div className="stack">
-      <PageHeader title="我的" meta={roleLabel(user.role)} action={<Button variant="ghost" onClick={() => void state.logout()}>退出</Button>} />
-      <Card>
-        <dl className="detail-grid">
-          <div><dt>姓名</dt><dd>{user.name}</dd></div>
-          <div><dt>单位</dt><dd>{getOrganization(user.organizationId)?.name}</dd></div>
-          <div><dt>手机号</dt><dd>{user.phone}</dd></div>
-          <div><dt>授权标段</dt><dd>{user.sectionScopeIds.map((id) => getSection(id)?.name).join("、")}</dd></div>
-        </dl>
-      </Card>
-      <Card>
-        <button className="list-row" onClick={() => state.setShowNotifications(true)}>通知 <span>{unread} 未读</span></button>
-        <div className="list-row">草稿 <span>{userDrafts.length} 条</span></div>
-        {userDrafts.map((draft) => (
-          <button key={draft.id} className="draft-row draft-button" onClick={() => state.openDraft(draft)}>
-            <strong>{draft.title}</strong>
-            <span>{formatDate(draft.savedAt)} · {draft.selectedPhotoIds?.length || 0} 张照片</span>
-          </button>
-        ))}
-        <PasswordChangeForm state={state} />
-      </Card>
+    <div className="stack settings-page">
+      <PageHeader title="设置" meta={roleLabel(user.role)} action={<Button variant="ghost" onClick={() => void state.logout()}>退出</Button>} />
+      <div className="settings-layout">
+        <div className="settings-primary">
+          {user.role === "admin" ? <SystemSettingsForm state={state} /> : null}
+          <Card>
+            <div className="card-title-row">
+              <h3>修改密码</h3>
+              <span className="muted">重新登录后生效</span>
+            </div>
+            <PasswordChangeForm state={state} />
+          </Card>
+        </div>
+        <aside className="settings-side">
+          <Card>
+            <h3>个人设置</h3>
+            <dl className="detail-grid settings-profile-grid">
+              <div><dt>姓名</dt><dd>{user.name}</dd></div>
+              <div><dt>角色</dt><dd>{roleLabel(user.role)}</dd></div>
+              <div><dt>单位</dt><dd>{organizationName(state.directory, user.organizationId)}</dd></div>
+              <div><dt>手机号</dt><dd>{user.phone}</dd></div>
+              <div className="wide"><dt>授权标段</dt><dd>{user.sectionScopeIds.map((id) => sectionName(state.directory, id)).join("、")}</dd></div>
+            </dl>
+          </Card>
+          <Card>
+            <h3>工作项</h3>
+            <button className="list-row" onClick={() => state.setShowNotifications(true)}>通知 <span>{unread} 未读</span></button>
+            <div className="list-row">草稿 <span>{userDrafts.length} 条</span></div>
+            {userDrafts.map((draft) => (
+              <button key={draft.id} className="draft-row draft-button" onClick={() => state.openDraft(draft)}>
+                <strong>{draft.title}</strong>
+                <span>{formatDate(draft.savedAt)} · {draft.selectedPhotoIds?.length || 0} 张照片</span>
+              </button>
+            ))}
+          </Card>
+        </aside>
+      </div>
     </div>
+  );
+}
+
+function SystemSettingsForm({ state }: { state: AppState }) {
+  const settings = state.systemSettings;
+  const [endpoint, setEndpoint] = useState(settings.objectStorage.endpoint);
+  const [bucket, setBucket] = useState(settings.objectStorage.bucket);
+  const [accessKey, setAccessKey] = useState("");
+  const [secretKey, setSecretKey] = useState("");
+  const [maxMb, setMaxMb] = useState(String(Math.round(settings.uploads.maxBytes / 1024 / 1024)));
+  const [backupsManagedExternally, setBackupsManagedExternally] = useState(settings.features.backupsManagedExternally);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setEndpoint(settings.objectStorage.endpoint);
+    setBucket(settings.objectStorage.bucket);
+    setMaxMb(String(Math.round(settings.uploads.maxBytes / 1024 / 1024)));
+    setBackupsManagedExternally(settings.features.backupsManagedExternally);
+  }, [settings]);
+
+  async function submit() {
+    setSaved(false);
+    const ok = await state.saveSystemSettings({
+      objectStorage: {
+        endpoint,
+        bucket,
+        accessKey,
+        secretKey
+      },
+      uploads: {
+        maxBytes: Math.max(1, Number(maxMb || 1)) * 1024 * 1024
+      },
+      features: {
+        backupsManagedExternally
+      }
+    });
+    if (ok) {
+      setAccessKey("");
+      setSecretKey("");
+      setSaved(true);
+    }
+  }
+
+  return (
+    <Card className="system-settings-card">
+      <div className="card-title-row">
+        <div>
+          <h3>系统功能设置</h3>
+          <p className="muted">管理员可维护影响全站运行的功能参数。</p>
+        </div>
+        {state.settingsState === "loading" ? <span className="muted">保存中...</span> : null}
+      </div>
+      <h4>对象存储</h4>
+      <div className="form-grid">
+        <Field label="对象存储地址">
+          <TextInput value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="例如：http://minio:9000" />
+        </Field>
+        <Field label="对象存储桶">
+          <TextInput value={bucket} onChange={(event) => setBucket(event.target.value)} placeholder="site-management" />
+        </Field>
+        <Field label="Access Key">
+          <TextInput value={accessKey} onChange={(event) => setAccessKey(event.target.value)} placeholder={settings.objectStorage.accessKeyConfigured ? "已配置，留空则不修改" : "请输入 Access Key"} />
+        </Field>
+        <Field label="Secret Key">
+          <TextInput value={secretKey} type="password" onChange={(event) => setSecretKey(event.target.value)} placeholder={settings.objectStorage.secretKeyConfigured ? "已配置，留空则不修改" : "请输入 Secret Key"} />
+        </Field>
+      </div>
+      <h4>上传与运维</h4>
+      <div className="form-grid">
+        <Field label="单张照片最大上传 MB">
+          <TextInput value={maxMb} type="number" onChange={(event) => setMaxMb(event.target.value)} />
+        </Field>
+        <label className="checkbox-row">
+          <input type="checkbox" checked={backupsManagedExternally} onChange={(event) => setBackupsManagedExternally(event.target.checked)} />
+          备份由服务器任务或面板统一管理
+        </label>
+      </div>
+      <p className="muted">对象存储配置保存后会影响后续照片上传与预览。Secret Key 不会在前端回显。</p>
+      {saved ? <p className="success-text">设置已保存。</p> : null}
+      {state.settingsState === "error" && state.dataError ? <p className="error-text">{state.dataError}</p> : null}
+      <div className="action-row">
+        <Button variant="secondary" onClick={() => void state.refreshSystemSettings()}>重新读取</Button>
+        <Button disabled={state.settingsState === "loading"} onClick={() => void submit()}>保存设置</Button>
+      </div>
+    </Card>
   );
 }
 
@@ -2656,8 +2985,7 @@ function PasswordChangeForm({ state }: { state: AppState }) {
     }
   }
   return (
-    <div className="inline-editor">
-      <h3>修改密码</h3>
+    <div className="inline-editor password-editor">
       <div className="form-grid">
         <Field label="当前密码">
           <TextInput value={currentPassword} type="password" onChange={(event) => setCurrentPassword(event.target.value)} />
@@ -2671,9 +2999,11 @@ function PasswordChangeForm({ state }: { state: AppState }) {
       </div>
       {localError ? <p className="error-text">{localError}</p> : null}
       {state.dataError ? <p className="error-text">{state.dataError}</p> : null}
-      <Button type="button" variant="secondary" disabled={submitting || !currentPassword || !newPassword || !confirmPassword} onClick={() => void submit()}>
-        {submitting ? "提交中" : "确认修改"}
-      </Button>
+      <div className="action-row">
+        <Button type="button" variant="secondary" disabled={submitting || !currentPassword || !newPassword || !confirmPassword} onClick={() => void submit()}>
+          {submitting ? "提交中" : "确认修改"}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -2742,16 +3072,16 @@ function DesktopTodo({ state, user }: { state: AppState; user: User }) {
 
 function DesktopDashboard({ state, user }: { state: AppState; user: User }) {
   const [sectionId, setSectionId] = useState("all");
-  const items = scopedItems(state, user).filter((item) => sectionId === "all" || item.sectionId === sectionId);
+  const items = scopedItems(state, user).filter((item) => item.status !== "voided").filter((item) => sectionId === "all" || item.sectionId === sectionId);
   const summary = summarize(items);
-  const byArea = countBy(items, (item) => getArea(item.areaId)?.name);
-  const byOrg = countBy(items.filter(isOverdue), (item) => getOrganization(item.responsibleOrgId)?.name);
+  const byArea = countBy(items, (item) => areaName(state.directory, item.areaId));
+  const byOrg = countBy(items.filter(isOverdue), (item) => organizationName(state.directory, item.responsibleOrgId));
   return (
     <div className="stack">
       <PageHeader title="整改看板" meta="按标段、区域、专业、责任单位追踪闭环" />
       <Select value={sectionId} onChange={(event) => setSectionId(event.target.value)}>
         <option value="all">全部标段</option>
-        {sections.map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}
+        {directorySections(state.directory).map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}
       </Select>
       <div className="desktop-metrics">
         <MetricCard label="总事项" value={summary.total} />
@@ -2761,8 +3091,8 @@ function DesktopDashboard({ state, user }: { state: AppState; user: User }) {
         <MetricCard label="已关闭" value={summary.closed} tone="ok" />
       </div>
       <div className="two-col">
-        <Card><h3>区域分布</h3>{Object.entries(byArea).map(([label, value]) => <BarRow key={label} label={label} value={value} max={Math.max(...Object.values(byArea), 1)} />)}</Card>
-        <Card><h3>超期责任单位</h3>{Object.entries(byOrg).map(([label, value]) => <BarRow key={label} label={label} value={value} max={Math.max(...Object.values(byOrg), 1)} />)}</Card>
+        <Card><h3>区域分布</h3>{Object.entries(byArea).map(([label, value]) => <BarRow key={label} label={label} value={value} max={Math.max(...Object.values(byArea), 1)} />)}{!Object.keys(byArea).length ? <p className="muted">暂无统计数据。</p> : null}</Card>
+        <Card><h3>超期责任单位</h3>{Object.entries(byOrg).map(([label, value]) => <BarRow key={label} label={label} value={value} max={Math.max(...Object.values(byOrg), 1)} />)}{!Object.keys(byOrg).length ? <p className="muted">暂无超期事项。</p> : null}</Card>
       </div>
     </div>
   );
@@ -2788,11 +3118,11 @@ function DesktopItems({ state, user }: { state: AppState; user: User }) {
     const text = [
       item.itemNo,
       item.title,
-      getSection(item.sectionId)?.name,
-      getArea(item.areaId)?.name,
-      getDiscipline(item.disciplineId)?.name,
-      getOrganization(item.responsibleOrgId)?.name,
-      getUser(item.responsibleUserId)?.name
+      sectionName(state.directory, item.sectionId),
+      areaName(state.directory, item.areaId),
+      disciplineName(state.directory, item.disciplineId),
+      organizationName(state.directory, item.responsibleOrgId),
+      userName(state.directory, item.responsibleUserId)
     ].join("");
     return matchesItemFilter(filters, item, user, state) && (state.runtimeConfig.useMocks ? text.includes(query) : true);
   });
@@ -2884,7 +3214,7 @@ function DesktopItems({ state, user }: { state: AppState; user: User }) {
           label="标段"
           value={filters.sectionId}
           open={openFilter === "sectionId"}
-          options={[{ value: "all", label: "全部标段" }, ...sections.map((section) => ({ value: section.id, label: section.name }))]}
+          options={[{ value: "all", label: "全部标段" }, ...directorySections(state.directory).map((section) => ({ value: section.id, label: section.name }))]}
           onToggle={() => setOpenFilter(openFilter === "sectionId" ? null : "sectionId")}
           onChange={(value) => {
             updateFilter("sectionId", value);
@@ -2895,7 +3225,7 @@ function DesktopItems({ state, user }: { state: AppState; user: User }) {
           label="区域"
           value={filters.areaId}
           open={openFilter === "areaId"}
-          options={[{ value: "all", label: "全部区域" }, ...areas.map((area) => ({ value: area.id, label: area.name }))]}
+          options={[{ value: "all", label: "全部区域" }, ...directoryAreas(state.directory).map((area) => ({ value: area.id, label: area.name }))]}
           onToggle={() => setOpenFilter(openFilter === "areaId" ? null : "areaId")}
           onChange={(value) => {
             updateFilter("areaId", value);
@@ -2906,7 +3236,7 @@ function DesktopItems({ state, user }: { state: AppState; user: User }) {
           label="专业"
           value={filters.disciplineId}
           open={openFilter === "disciplineId"}
-          options={[{ value: "all", label: "全部专业" }, ...disciplines.map((discipline) => ({ value: discipline.id, label: discipline.name }))]}
+          options={[{ value: "all", label: "全部专业" }, ...directoryDisciplines(state.directory).map((discipline) => ({ value: discipline.id, label: discipline.name }))]}
           onToggle={() => setOpenFilter(openFilter === "disciplineId" ? null : "disciplineId")}
           onChange={(value) => {
             updateFilter("disciplineId", value);
@@ -2919,7 +3249,7 @@ function DesktopItems({ state, user }: { state: AppState; user: User }) {
           open={openFilter === "organizationId"}
           options={[
             { value: "all", label: "全部责任单位" },
-            ...organizations.filter((organization) => organization.type === "contractor").map((organization) => ({ value: organization.id, label: organization.name }))
+            ...directoryOrganizations(state.directory).filter((organization) => organization.type === "contractor").map((organization) => ({ value: organization.id, label: organization.name }))
           ]}
           onToggle={() => setOpenFilter(openFilter === "organizationId" ? null : "organizationId")}
           onChange={(value) => {
@@ -3012,12 +3342,12 @@ function SiteItemTable({ items, state, emptyTitle }: { items: SiteItem[]; state:
               <td><StatusTag status={item.status} /></td>
               <td><SeverityTag severity={item.severity} /></td>
               <td>{item.title}</td>
-              <td>{getSection(item.sectionId)?.name || "-"}</td>
-              <td>{getArea(item.areaId)?.name || "-"} / {getDiscipline(item.disciplineId)?.name || "-"}</td>
-              <td>{getOrganization(item.responsibleOrgId)?.name || "待责任工程师派发"}</td>
-              <td>{getUser(item.responsibleUserId)?.name || "待分配"}</td>
+              <td>{sectionName(state.directory, item.sectionId)}</td>
+              <td>{areaName(state.directory, item.areaId)} / {disciplineName(state.directory, item.disciplineId)}</td>
+              <td>{organizationName(state.directory, item.responsibleOrgId)}</td>
+              <td>{item.responsibleUserId ? userName(state.directory, item.responsibleUserId) : "待分配"}</td>
               <td>{formatDate(item.dueAt)}</td>
-              <td>{itemPhotos(item.id, state.photos).length} 张</td>
+              <td>{visiblePhotoCount(item, state.photos)} 张</td>
               <td>
                 <Button variant="secondary" onClick={() => state.setSelectedItemId(item.id)}>打开处理</Button>
               </td>
@@ -3569,7 +3899,7 @@ function ExportsPage({ state, user }: { state: AppState; user: User }) {
               job.id,
               exportTypeText(job.type),
               job.status,
-              getUser(job.requestedBy)?.name || "-",
+              userName(state.directory, job.requestedBy),
               formatDate(job.createdAt),
               <div className="action-row wrap">
                 <Button variant="secondary" onClick={() => void state.refreshExportJob(job.id)}>刷新</Button>
@@ -3672,7 +4002,7 @@ function AuditPage({ state }: { state: AppState }) {
       {state.auditLogState === "error" && state.dataError ? <p className="error-text">{state.dataError}</p> : null}
       <DataTable
         columns={["时间", "用户", "动作", "资源", "资源 ID"]}
-        rows={state.auditLogRecords.map((log) => [formatDate(log.createdAt), getUser(log.actorId)?.name || "-", log.action, log.resourceType, log.resourceId])}
+        rows={state.auditLogRecords.map((log) => [formatDate(log.createdAt), userName(state.directory, log.actorId), log.action, log.resourceType, log.resourceId])}
       />
     </div>
   );
@@ -3711,16 +4041,89 @@ function StatusPill({ text }: { text: string }) {
 
 function PhotoPreviewModal({ state, photo, item, onClose }: { state: AppState; photo: PhotoAttachment; item?: SiteItem; onClose: () => void }) {
   const previewUrl = state.photoPreviewUrls[photo.id];
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef({ active: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [isDragging, setIsDragging] = useState(false);
+  const zoomPercent = Math.round(zoom * 100);
+  const updateZoom = (nextZoom: number) => {
+    setZoom(Math.min(3, Math.max(0.5, Math.round(nextZoom * 100) / 100)));
+  };
+  const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (zoom <= 1 || !frameRef.current) return;
+    const frame = frameRef.current;
+    dragRef.current = {
+      active: true,
+      startX: event.clientX,
+      startY: event.clientY,
+      scrollLeft: frame.scrollLeft,
+      scrollTop: frame.scrollTop
+    };
+    frame.setPointerCapture(event.pointerId);
+    setIsDragging(true);
+  };
+  const moveDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const frame = frameRef.current;
+    const drag = dragRef.current;
+    if (!drag.active || !frame) return;
+    event.preventDefault();
+    frame.scrollLeft = drag.scrollLeft - (event.clientX - drag.startX);
+    frame.scrollTop = drag.scrollTop - (event.clientY - drag.startY);
+  };
+  const stopDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current.active) return;
+    dragRef.current.active = false;
+    if (frameRef.current?.hasPointerCapture(event.pointerId)) {
+      frameRef.current.releasePointerCapture(event.pointerId);
+    }
+    setIsDragging(false);
+  };
   useEffect(() => {
     void state.loadPhotoPreview(photo.id);
   }, [photo.id, state.loadPhotoPreview]);
+  useEffect(() => {
+    setZoom(1);
+    setIsDragging(false);
+    dragRef.current.active = false;
+  }, [photo.id]);
+  useEffect(() => {
+    if (zoom <= 1 && frameRef.current) {
+      frameRef.current.scrollTo({ left: 0, top: 0 });
+      dragRef.current.active = false;
+      setIsDragging(false);
+    }
+  }, [zoom]);
   return (
     <div className="modal-backdrop">
       <section className="modal photo-preview-modal">
-        <PageHeader title="照片预览" meta={photo.fileName} action={<Button variant="ghost" onClick={onClose}>关闭</Button>} />
-        <div className="photo-preview-frame">
+        <div className="modal-sticky-head">
+          <PageHeader title="照片预览" meta={photo.fileName} action={<Button variant="ghost" onClick={onClose}>关闭</Button>} />
+        </div>
+        <div className="preview-toolbar">
+          <Button variant="secondary" disabled={zoom <= 0.5} onClick={() => updateZoom(zoom - 0.25)}>缩小</Button>
+          <span>{zoomPercent}%</span>
+          <Button variant="secondary" disabled={zoom >= 3} onClick={() => updateZoom(zoom + 0.25)}>放大</Button>
+          <Button variant="ghost" onClick={() => updateZoom(1)}>适屏</Button>
+        </div>
+        <div
+          ref={frameRef}
+          className={`photo-preview-frame ${zoom > 1 ? "is-zoomed" : ""} ${isDragging ? "is-dragging" : ""}`}
+          onPointerDown={startDrag}
+          onPointerMove={moveDrag}
+          onPointerUp={stopDrag}
+          onPointerCancel={stopDrag}
+        >
           {previewUrl ? (
-            <img src={previewUrl} alt={photo.fileName} />
+            <img
+              className="photo-preview-image"
+              src={previewUrl}
+              alt={photo.fileName}
+              style={{
+                width: `${zoom * 100}%`,
+                maxWidth: zoom <= 1 ? "100%" : "none",
+                maxHeight: zoom <= 1 ? "60vh" : "none"
+              }}
+            />
           ) : (
             <>
               <span>{photoStageLabel(photo.stage)}</span>
@@ -3731,7 +4134,7 @@ function PhotoPreviewModal({ state, photo, item, onClose }: { state: AppState; p
         {state.dataError && !state.runtimeConfig.useMocks ? <p className="error-text">{state.dataError}</p> : null}
         <dl className="detail-grid">
           <div><dt>状态</dt><dd>{item ? `${item.itemNo} · ${photoStageLabel(photo.stage)}` : "未绑定"}</dd></div>
-          <div><dt>上传人</dt><dd>{getUser(photo.uploadedBy)?.name || "未知上传人"}</dd></div>
+          <div><dt>上传人</dt><dd>{userName(state.directory, photo.uploadedBy)}</dd></div>
           <div><dt>上传时间</dt><dd>{formatDate(photo.uploadedAt)}</dd></div>
           <div><dt>区域</dt><dd>{photo.areaSnapshot || "-"}</dd></div>
           <div><dt>专业</dt><dd>{photo.disciplineSnapshot || "-"}</dd></div>

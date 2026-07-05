@@ -136,6 +136,7 @@ export interface SiteItem {
   voidedAt?: string;
   createdAt: string;
   updatedAt: string;
+  photoCount?: number;
 }
 
 export interface PhotoAttachment {

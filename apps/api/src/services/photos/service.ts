@@ -8,6 +8,7 @@ import type { PresignResult } from "../../storage.js";
 import { ObjectStorageClient } from "../../storage.js";
 import type { PhotoAttachment, User } from "../../types.js";
 import type { PhotoListFilters } from "../../repositories/photos/index.js";
+import type { SystemSettingsService } from "../system-settings/index.js";
 
 export interface PhotoPresignInput {
   fileName?: string;
@@ -28,18 +29,19 @@ export class PhotosService {
     private readonly storage: ObjectStorageClient,
     private readonly config: ApiConfig,
     private readonly idempotencyService: IdempotencyService,
-    private readonly auditRepository: AuditRepository
+    private readonly auditRepository: AuditRepository,
+    private readonly settingsService?: SystemSettingsService
   ) {}
 
   async list(viewer: User, filters: PhotoListFilters = {}): Promise<PhotoAttachment[]> {
     return this.repository.list(viewer, filters);
   }
 
-  presign(viewer: User, input: PhotoPresignInput): PresignResult {
+  async presign(viewer: User, input: PhotoPresignInput): Promise<PresignResult> {
     const fileName = input.fileName ?? "";
     const mimeType = input.mimeType ?? "";
     const sizeBytes = Number(input.sizeBytes ?? 0);
-    validateUpload(mimeType, sizeBytes, this.config.uploadMaxBytes);
+    validateUpload(mimeType, sizeBytes, await this.uploadMaxBytes());
     return this.storage.createUploadTarget({
       actorId: viewer.id,
       fileName,
@@ -50,7 +52,7 @@ export class PhotosService {
 
   async completeUpload(viewer: User, input: PhotoCompleteInput, idempotency?: Pick<IdempotencyRequest, "key" | "method" | "path">): Promise<PhotoAttachment> {
     validateCompletedObject(viewer, input);
-    validateUpload(input.mimeType ?? "image/jpeg", Number(input.sizeBytes ?? 0), this.config.uploadMaxBytes);
+    validateUpload(input.mimeType ?? "image/jpeg", Number(input.sizeBytes ?? 0), await this.uploadMaxBytes());
     return this.repository.transaction(async (context) => {
       const repository = new PhotosRepository(context);
       const idempotencyService = this.idempotencyService.withContext(context);
@@ -86,7 +88,10 @@ export class PhotosService {
   }
 
   async preview(viewer: User, photoId: string): Promise<{ previewUrl: string; expiresInSeconds: number }> {
-    return this.storage.createPreviewTarget(await this.previewObjectKey(viewer, photoId));
+    return {
+      previewUrl: await this.storage.readObjectDataUrl(await this.previewObjectKey(viewer, photoId)),
+      expiresInSeconds: 900
+    };
   }
 
   async delete(viewer: User, photoId: string, idempotency?: Pick<IdempotencyRequest, "key" | "method" | "path">): Promise<PhotoAttachment> {
@@ -118,6 +123,10 @@ export class PhotosService {
         }
       );
     });
+  }
+
+  private uploadMaxBytes(): Promise<number> {
+    return this.settingsService?.uploadMaxBytes() ?? Promise.resolve(this.config.uploadMaxBytes);
   }
 }
 

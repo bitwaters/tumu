@@ -21,6 +21,21 @@ const viewer: User = {
   passwordHash: "hash"
 };
 
+test("object storage links use runtime endpoint and bucket settings", async () => {
+  const storage = new ObjectStorageClient(loadConfig(), async () => ({
+    endpoint: "http://runtime-minio:9000",
+    bucket: "runtime-bucket",
+    accessKey: "runtime-access-key",
+    secretKey: "runtime-secret-key"
+  }));
+
+  const preview = await storage.createPreviewTarget("drawings/cover 1.png");
+  const download = await storage.createDownloadTarget("exports/report.xlsx");
+
+  equal(preview.previewUrl, "http://runtime-minio:9000/runtime-bucket/drawings/cover%201.png?preview=1");
+  equal(download.downloadUrl, "http://runtime-minio:9000/runtime-bucket/exports/report.xlsx?download=1");
+});
+
 test("photo complete upload replays idempotent response without duplicate records", async () => {
   const state = createPhotoPrismaState();
   const service = createPhotosService(state);

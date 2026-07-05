@@ -9,7 +9,7 @@ test("http helpers use configured CORS origin", () => {
   setCorsHeaders(response, "https://power-site.example");
 
   equal(response.headers.get("access-control-allow-origin"), "https://power-site.example");
-  equal(response.headers.get("access-control-allow-methods"), "GET,POST,PATCH,DELETE,OPTIONS");
+  equal(response.headers.get("access-control-allow-methods"), "GET,POST,PUT,PATCH,DELETE,OPTIONS");
   equal(response.headers.get("access-control-allow-headers"), "authorization,content-type,idempotency-key");
 });
 

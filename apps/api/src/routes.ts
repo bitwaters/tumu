@@ -306,7 +306,7 @@ export function buildRouter(store: Store, config: ApiConfig): Router {
     return revision.pages;
   });
 
-  router.add("GET", "/drawing-revisions/:id/preview", (request) => {
+  router.add("GET", "/drawing-revisions/:id/preview", async (request) => {
     authenticate(request, store, config);
     const { user } = requireContext(request);
     const { drawing, revision } = mustFindRevision(store, request.params.id);
@@ -621,7 +621,7 @@ function registerExportRoutes(router: Router, store: Store, config: ApiConfig, s
     return job;
   });
 
-  router.add("GET", "/exports/:id/download", (request) => {
+  router.add("GET", "/exports/:id/download", async (request) => {
     authenticate(request, store, config);
     const { user } = requireContext(request);
     const job = mustFindAuthorizedExportJob(store, user, request.params.id);
@@ -639,7 +639,7 @@ function registerExportRoutes(router: Router, store: Store, config: ApiConfig, s
     return {
       fileName: job.artifactFileName,
       mimeType: job.artifactMimeType,
-      ...storage.createDownloadTarget(job.artifactKey)
+      ...(await storage.createDownloadTarget(job.artifactKey))
     };
   });
 }
@@ -897,7 +897,7 @@ function registerPhotoRoutes(router: Router, store: Store, config: ApiConfig, st
       .filter((photo) => !search || photo.fileName.toLowerCase().includes(search));
   });
 
-  router.add("GET", "/photos/:id/preview", (request) => {
+  router.add("GET", "/photos/:id/preview", async (request) => {
     authenticate(request, store, config);
     const { user } = requireContext(request);
     const photo = mustFind(store.photos, request.params.id, "Photo");

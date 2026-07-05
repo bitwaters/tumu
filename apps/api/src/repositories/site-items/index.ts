@@ -97,6 +97,15 @@ export class SiteItemsRepository {
   async list(viewer: User, filters: SiteItemListFilters = {}): Promise<SiteItem[]> {
     const records = await this.context.prisma.siteItem.findMany({
       where: buildListWhere(viewer, filters),
+      include: {
+        _count: {
+          select: {
+            photos: {
+              where: { deletedAt: null }
+            }
+          }
+        }
+      },
       orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }]
     });
 

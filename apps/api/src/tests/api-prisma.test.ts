@@ -291,7 +291,8 @@ function createPrismaHarness(router: Router) {
         "user-agent": "node-test"
       },
       body,
-      rawBody: body ? JSON.stringify(body) : ""
+      rawBody: body ? JSON.stringify(body) : "",
+      rawBuffer: body ? Buffer.from(JSON.stringify(body)) : new Uint8Array()
     };
     return match.route.handler(apiRequest);
   };

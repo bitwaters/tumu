@@ -3,7 +3,7 @@ import type { ApiConfig } from "./config.js";
 import { badRequest, forbidden, notFound, unauthorized } from "./errors.js";
 import { assertRecord, readString, readStringArray, Router } from "./http.js";
 import { hashPassword, stableHash, verifyTokenPayload } from "./security.js";
-import { ObjectStorageClient } from "./storage.js";
+import { ObjectStorageClient, decodeObjectKey } from "./storage.js";
 import { AuditRepository } from "./repositories/audit/index.js";
 import { AuthRepository } from "./repositories/auth/index.js";
 import { DrawingsRepository } from "./repositories/drawings/index.js";
@@ -12,6 +12,7 @@ import { MasterDataRepository } from "./repositories/master-data/index.js";
 import { NotificationsRepository } from "./repositories/notifications/index.js";
 import { PhotosRepository } from "./repositories/photos/index.js";
 import { SiteItemsRepository } from "./repositories/site-items/index.js";
+import { SystemSettingsRepository } from "./repositories/system-settings/index.js";
 import { ExportJobsRepository } from "./repositories/export-jobs/index.js";
 import { ImportJobsRepository } from "./repositories/import-jobs/index.js";
 import { UsersRepository } from "./repositories/users/index.js";
@@ -23,6 +24,7 @@ import { MasterDataService, type MasterDataKind } from "./services/master-data/i
 import { NotificationsService } from "./services/notifications/index.js";
 import { PhotosService } from "./services/photos/index.js";
 import { SiteItemsService } from "./services/site-items/index.js";
+import { SystemSettingsService, type SystemSettingsUpdateInput } from "./services/system-settings/index.js";
 import { UsersService } from "./services/users/index.js";
 import {
   buildAuditExport,
@@ -40,9 +42,11 @@ import type { ExportJob, ImportJob, ImportKind, Role, Severity, SiteItem, SiteIt
 export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Router {
   const router = new Router();
   const context = { prisma };
-  const storage = new ObjectStorageClient(config);
 
   const auditRepository = new AuditRepository(context);
+  const systemSettingsRepository = new SystemSettingsRepository(context);
+  const systemSettingsService = new SystemSettingsService(systemSettingsRepository, config, auditRepository);
+  const storage = new ObjectStorageClient(config, () => systemSettingsService.objectStorageConfig());
   const authRepository = new AuthRepository(context);
   const idempotencyRepository = new IdempotencyRepository(context);
   const notificationsRepository = new NotificationsRepository(context);
@@ -58,7 +62,7 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
   const masterDataService = new MasterDataService(masterDataRepository, auditRepository);
   const drawingsService = new DrawingsService(new DrawingsRepository(context), auditRepository);
   const siteItemsService = new SiteItemsService(siteItemsRepository, auditRepository, idempotencyService, notificationsRepository);
-  const photosService = new PhotosService(new PhotosRepository(context), storage, config, idempotencyService, auditRepository);
+  const photosService = new PhotosService(new PhotosRepository(context), storage, config, idempotencyService, auditRepository, systemSettingsService);
   const notificationsService = new NotificationsService(notificationsRepository);
   const auditService = new AuditService(auditRepository);
 
@@ -79,14 +83,17 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
     time: new Date().toISOString()
   }));
 
-  router.add("GET", "/ready", () => ({
+  router.add("GET", "/ready", async () => {
+    const objectStorage = await systemSettingsService.objectStorageConfig();
+    return {
     status: "ok",
     dependencies: {
       postgresql: { status: "configured", url: redact(config.databaseUrl) },
       redis: { status: "configured", url: config.redisUrl },
-      objectStorage: { status: "configured", endpoint: config.objectStorageEndpoint, bucket: config.objectStorageBucket }
+      objectStorage: { status: "configured", endpoint: objectStorage.endpoint, bucket: objectStorage.bucket }
     }
-  }));
+  };
+  });
 
   router.add("POST", "/auth/login", (request) => {
     const body = assertRecord(request.body);
@@ -102,6 +109,9 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
     const body = assertRecord(request.body);
     return authService.changePassword(await viewer(request), readString(body, "currentPassword", false), readString(body, "newPassword", false));
   });
+
+  router.add("GET", "/settings", async (request) => systemSettingsService.view(await viewer(request)));
+  router.add("PATCH", "/settings", async (request) => systemSettingsService.update(await viewer(request), readSystemSettingsUpdate(assertRecord(request.body))));
 
   router.add("GET", "/users", async (request) => {
     const actor = await viewer(request);
@@ -207,6 +217,14 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
   registerWorkflow(router, viewer, siteItemsService, "comment", "comments");
 
   router.add("POST", "/photos/presign", async (request) => photosService.presign(await viewer(request), pickDefined(assertRecord(request.body))));
+  router.add("PUT", "/photos/upload/:key", async (request) => {
+    const actor = await viewer(request);
+    const objectKey = decodeObjectKey(request.params.key);
+    if (!objectKey.startsWith(`uploads/${actor.id}/`)) throw badRequest("objectKey does not belong to current user");
+    const contentType = Array.isArray(request.headers["content-type"]) ? request.headers["content-type"][0] : request.headers["content-type"] ?? "application/octet-stream";
+    await storage.putObject(objectKey, request.rawBuffer, contentType);
+    return { objectKey };
+  });
   router.add("POST", "/photos/complete", async (request) =>
     photosService.completeUpload(await viewer(request), pickDefined(assertRecord(request.body)), idempotencyRequest(request))
   );
@@ -362,7 +380,7 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
     return {
       fileName: job.artifactFileName,
       mimeType: job.artifactMimeType,
-      ...storage.createDownloadTarget(job.artifactKey)
+      ...(await storage.createDownloadTarget(job.artifactKey))
     };
   });
 
@@ -581,6 +599,36 @@ function parseAuditExportFilters(body: Record<string, unknown>) {
 function readImportKind(value: string): ImportKind {
   if (["organizations", "sections", "areas", "disciplines", "users"].includes(value)) return value as ImportKind;
   throw badRequest("import kind is invalid");
+}
+
+function readSystemSettingsUpdate(body: Record<string, unknown>): SystemSettingsUpdateInput {
+  const objectStorage = isRecord(body.objectStorage) ? body.objectStorage : undefined;
+  const uploads = isRecord(body.uploads) ? body.uploads : undefined;
+  const features = isRecord(body.features) ? body.features : undefined;
+  return pickDefined({
+    objectStorage: objectStorage
+      ? pickDefined({
+          endpoint: typeof objectStorage.endpoint === "string" ? objectStorage.endpoint : undefined,
+          bucket: typeof objectStorage.bucket === "string" ? objectStorage.bucket : undefined,
+          accessKey: typeof objectStorage.accessKey === "string" ? objectStorage.accessKey : undefined,
+          secretKey: typeof objectStorage.secretKey === "string" ? objectStorage.secretKey : undefined
+        })
+      : undefined,
+    uploads: uploads
+      ? pickDefined({
+          maxBytes: typeof uploads.maxBytes === "number" || typeof uploads.maxBytes === "string" ? Number(uploads.maxBytes) : undefined
+        })
+      : undefined,
+    features: features
+      ? pickDefined({
+          backupsManagedExternally: typeof features.backupsManagedExternally === "boolean" ? features.backupsManagedExternally : undefined
+        })
+      : undefined
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 const siteItemStatuses = ["pending_approval", "dispatched", "rectifying", "pending_acceptance", "closed", "voided"] as const;

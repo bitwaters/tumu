@@ -75,6 +75,7 @@ export class SiteItemsService {
 
     return {
       ...detail.item,
+      photoCount: detail.photos.length,
       photos: groupPhotosByStage(detail.photos),
       workflowLogs: detail.workflowLogs,
       allowedActions: allowedWorkflowActions(viewer, detail.item)
@@ -252,6 +253,7 @@ async function detailPayload(repository: SiteItemsRepository, viewer: User, item
   if (!detail) throw notFound("Site item not found");
   return {
     ...detail.item,
+    photoCount: detail.photos.length,
     photos: groupPhotosByStage(detail.photos),
     workflowLogs: detail.workflowLogs,
     allowedActions: allowedWorkflowActions(viewer, detail.item)
