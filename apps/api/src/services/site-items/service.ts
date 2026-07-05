@@ -164,7 +164,7 @@ export class SiteItemsService {
         async () => {
           const detail = await repository.findDetailById(viewer, itemId);
           if (!detail) throw notFound("Site item not found");
-          if (!canWorkflowOwner(viewer, detail.item) || detail.item.status === "closed" || detail.item.status === "voided") {
+          if (!canWorkflowOwner(viewer, detail.item) || detail.item.status !== "pending_approval") {
             throw forbidden();
           }
           if (input.sectionId && !canAccessSection(viewer, input.sectionId)) throw forbidden();
@@ -340,8 +340,8 @@ interface WorkflowResolution {
     status?: SiteItemStatus;
     responsibleOrgId?: string;
     responsibleUserId?: string;
-    submittedForReviewAt?: Date;
-    closedAt?: Date;
+    submittedForReviewAt?: Date | null;
+    closedAt?: Date | null;
     reopenedAt?: Date;
     voidedAt?: Date;
   };
@@ -383,7 +383,7 @@ async function resolveWorkflowUpdate(
   }
 
   if (action === "assign_rectifier") {
-    if (!canAssignRectifier(viewer, item) || item.status === "closed" || item.status === "voided") throw forbidden();
+    if (!canAssignRectifier(viewer, item) || item.status !== "dispatched" || item.responsibleUserId) throw forbidden();
     const assignment = await validateResponsibleAssignment(repository, item.sectionId, item.responsibleOrgId ?? "", input.responsibleUserId ?? "");
     return {
       update: {
@@ -425,6 +425,23 @@ async function resolveWorkflowUpdate(
   if (action === "close") {
     if (!canWorkflowOwner(viewer, item) || item.status !== "pending_acceptance") throw forbidden();
     return { update: { status: "closed", closedAt: new Date() }, photoStage: "review", comment };
+  }
+
+  if (action === "return_rectification") {
+    if (!canWorkflowOwner(viewer, item) || item.status !== "pending_acceptance") throw forbidden();
+    return {
+      update: {
+        status: "rectifying",
+        submittedForReviewAt: null
+      },
+      notification: {
+        recipientId: item.responsibleUserId,
+        type: "assigned",
+        title: "退回重新整改",
+        content: item.title
+      },
+      comment
+    };
   }
 
   if (action === "void") {

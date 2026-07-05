@@ -167,6 +167,7 @@ test("drawing APIs enforce admin writes and expose revision previews", async () 
 test("site item workflow applies role permissions and idempotency", async () => {
   const { store, request } = createHarness();
   const supervisorToken = await login(request, "wang.supervisor");
+  const contractorManagerToken = await login(request, "li.manager");
   const rectifierToken = await login(request, "zhao.fix");
   const created = (await request(
     "POST",
@@ -214,9 +215,18 @@ test("site item workflow applies role permissions and idempotency", async () => 
   );
   equal(store.siteItems.find((item) => item.id === created.id)?.status, "pending_approval");
   await request("POST", `/site-items/${created.id}/dispatch`, { responsibleOrgId: "org-civil", responsibleUserId: "u-rectifier-civil" }, supervisorToken, "dispatch-1");
+  await rejects(() => request("PATCH", `/site-items/${created.id}`, { title: "派发后不允许编辑" }, supervisorToken));
+  const assignedDetail = (await request("GET", `/site-items/${created.id}`, undefined, contractorManagerToken)) as { allowedActions: string[] };
+  ok(!assignedDetail.allowedActions.includes("assign_rectifier"));
   await rejects(() => request("POST", `/site-items/${created.id}/close`, {}, rectifierToken));
   await request("POST", `/site-items/${created.id}/start-rectify`, {}, rectifierToken, "start-1");
   await request("POST", `/site-items/${created.id}/submit-review`, { photoIds: [] }, rectifierToken, "review-1");
+  const pendingAcceptanceDetail = (await request("GET", `/site-items/${created.id}`, undefined, supervisorToken)) as { allowedActions: string[] };
+  ok(pendingAcceptanceDetail.allowedActions.includes("return_rectification"));
+  ok(!pendingAcceptanceDetail.allowedActions.includes("assign_rectifier"));
+  await request("POST", `/site-items/${created.id}/return-rectification`, { comment: "请退回重新整改" }, supervisorToken, "return-rectification-1");
+  equal(store.siteItems.find((item) => item.id === created.id)?.status, "rectifying");
+  await request("POST", `/site-items/${created.id}/submit-review`, { photoIds: [] }, rectifierToken, "review-2");
   await request("POST", `/site-items/${created.id}/close`, { photoIds: [] }, supervisorToken, "close-1");
   equal(store.siteItems.find((item) => item.id === created.id)?.status, "closed");
 });

@@ -400,7 +400,7 @@ export function buildRouter(store: Store, config: ApiConfig): Router {
     authenticate(request, store, config);
     const { user } = requireContext(request);
     const item = mustFind(store.siteItems, request.params.id, "SiteItem");
-    if (!canWorkflowOwner(user, item) || item.status === "closed" || item.status === "voided") throw forbidden();
+    if (!canWorkflowOwner(user, item) || item.status !== "pending_approval") throw forbidden();
     const changes = pickSiteItemEdits(assertRecord(request.body));
     if (changes.sectionId && !canAccessSection(user, changes.sectionId)) throw forbidden();
     Object.assign(item, changes, { updatedAt: new Date().toISOString() });
@@ -778,6 +778,7 @@ function registerWorkflowRoutes(router: Router, store: Store, config: ApiConfig)
   router.add("POST", "/site-items/:id/assign-rectifier", (request) => workflow(request, store, config, "assign_rectifier"));
   router.add("POST", "/site-items/:id/start-rectify", (request) => workflow(request, store, config, "start_rectify"));
   router.add("POST", "/site-items/:id/submit-review", (request) => workflow(request, store, config, "submit_review"));
+  router.add("POST", "/site-items/:id/return-rectification", (request) => workflow(request, store, config, "return_rectification"));
   router.add("POST", "/site-items/:id/close", (request) => workflow(request, store, config, "close"));
   router.add("POST", "/site-items/:id/void", (request) => workflow(request, store, config, "void"));
   router.add("POST", "/site-items/:id/reopen", (request) => workflow(request, store, config, "reopen"));
@@ -809,7 +810,7 @@ async function workflow(request: Parameters<Router["add"]>[2] extends (request: 
       toStatus = "dispatched";
       notify(store, item.responsibleUserId, item, "assigned", "新整改任务", item.title);
     } else if (action === "assign_rectifier") {
-      if (!canAssignRectifier(user, item) || item.status === "closed" || item.status === "voided") throw forbidden();
+      if (!canAssignRectifier(user, item) || item.status !== "dispatched" || item.responsibleUserId) throw forbidden();
       const assignment = validateResponsibleAssignment(store, item, item.responsibleOrgId ?? "", readString(body, "responsibleUserId") ?? "");
       item.responsibleUserId = assignment.responsibleUserId;
       notify(store, assignment.responsibleUserId, item, "assigned", "整改任务已分配", item.title);
@@ -827,6 +828,11 @@ async function workflow(request: Parameters<Router["add"]>[2] extends (request: 
       bindPhotos(store, user, item, readStringArray(body, "photoIds"), "review");
       item.closedAt = new Date().toISOString();
       toStatus = "closed";
+    } else if (action === "return_rectification") {
+      if (!canWorkflowOwner(user, item) || item.status !== "pending_acceptance") throw forbidden();
+      item.submittedForReviewAt = undefined;
+      toStatus = "rectifying";
+      notify(store, item.responsibleUserId, item, "assigned", "退回重新整改", item.title);
     } else if (action === "void") {
       if (!canWorkflowOwner(user, item) || item.status === "closed") throw forbidden();
       item.voidedAt = new Date().toISOString();

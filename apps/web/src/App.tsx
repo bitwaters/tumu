@@ -303,7 +303,7 @@ function activeRectifiersForDirectory(directory: DirectoryData, organizationId: 
 }
 
 function canEditSiteItem(user: User, item: SiteItem): boolean {
-  if (item.status === "closed" || item.status === "voided") return false;
+  if (item.status !== "pending_approval") return false;
   if (user.role !== "admin" && !user.sectionScopeIds.includes(item.sectionId)) return false;
   return user.role === "admin" || user.role === "supervisor" || item.ownerUserId === user.id || item.createdBy === user.id;
 }
@@ -4172,7 +4172,7 @@ function actionLabel(action: WorkflowAction) {
     assign_rectifier: "分配整改人",
     start_rectify: "开始整改",
     submit_review: "提交复验",
-    return_rectification: "退回复改",
+    return_rectification: "退回重新整改",
     close: "关闭",
     void: "作废",
     reopen: "重开",

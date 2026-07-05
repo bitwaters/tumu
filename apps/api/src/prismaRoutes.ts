@@ -211,6 +211,7 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
   registerWorkflow(router, viewer, siteItemsService, "assign_rectifier", "assign-rectifier");
   registerWorkflow(router, viewer, siteItemsService, "start_rectify", "start-rectify");
   registerWorkflow(router, viewer, siteItemsService, "submit_review", "submit-review");
+  registerWorkflow(router, viewer, siteItemsService, "return_rectification", "return-rectification");
   registerWorkflow(router, viewer, siteItemsService, "close");
   registerWorkflow(router, viewer, siteItemsService, "void");
   registerWorkflow(router, viewer, siteItemsService, "reopen");

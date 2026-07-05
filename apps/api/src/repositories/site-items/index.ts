@@ -64,8 +64,8 @@ export interface UpdateSiteItemWorkflowInput {
   status?: SiteItemStatus;
   responsibleOrgId?: string;
   responsibleUserId?: string;
-  submittedForReviewAt?: Date;
-  closedAt?: Date;
+  submittedForReviewAt?: Date | null;
+  closedAt?: Date | null;
   reopenedAt?: Date;
   voidedAt?: Date;
 }

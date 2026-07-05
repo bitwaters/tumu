@@ -80,6 +80,7 @@ function workflowPath(action: WorkflowAction): string {
     assign_rectifier: "assign-rectifier",
     start_rectify: "start-rectify",
     submit_review: "submit-review",
+    return_rectification: "return-rectification",
     comment: "comments"
   };
   return paths[action] ?? action;
