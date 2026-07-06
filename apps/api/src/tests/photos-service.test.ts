@@ -30,10 +30,10 @@ test("object storage links use runtime endpoint and bucket settings", async () =
     secretKey: "runtime-secret-key"
   }));
 
-  const preview = await storage.createPreviewTarget("drawings/cover 1.png");
+  const preview = await storage.createPreviewTarget("photos/cover 1.png");
   const download = await storage.createDownloadTarget("exports/report.xlsx");
 
-  equal(preview.previewUrl, "http://runtime-minio:9000/runtime-bucket/drawings/cover%201.png?preview=1");
+  equal(preview.previewUrl, "http://runtime-minio:9000/runtime-bucket/photos/cover%201.png?preview=1");
   equal(download.downloadUrl, "http://runtime-minio:9000/runtime-bucket/exports/report.xlsx?download=1");
 });
 

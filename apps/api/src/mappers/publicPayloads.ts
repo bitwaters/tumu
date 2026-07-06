@@ -3,7 +3,6 @@ import {
   publicUser
 } from "../authorization.js";
 import type {
-  Drawing,
   PhotoAttachment,
   PhotoStage,
   SiteItem,
@@ -18,13 +17,6 @@ export function mapPublicUser(user: User) {
 
 export function mapUserSectionScopeIds(user: User): string[] {
   return [...user.sectionScopeIds];
-}
-
-export function mapDrawingWithCurrentRevision(drawing: Drawing) {
-  return {
-    ...drawing,
-    currentRevision: drawing.revisions.find((revision) => revision.isCurrent)
-  };
 }
 
 export function groupPhotosByStage(photos: PhotoAttachment[]) {

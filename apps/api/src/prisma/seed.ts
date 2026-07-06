@@ -54,14 +54,8 @@ function insert(table: string, rows: object[]): string {
   return `INSERT INTO "${table}" (${columns.map((column) => `"${column}"`).join(", ")}) VALUES\n${values};`;
 }
 
-const drawingRows = store.drawings.map(({ revisions: _revisions, ...drawing }) => drawing);
-const revisionRows = store.drawings.flatMap((drawing) =>
-  drawing.revisions.map(({ pages: _pages, ...revision }) => revision)
-);
-const pageRows = store.drawings.flatMap((drawing) => drawing.revisions.flatMap((revision) => revision.pages));
-
 const seedSql = [
-  `TRUNCATE TABLE "IdempotencyRecord", "AuditLog", "ImportJob", "ExportJob", "Notification", "WorkflowLog", "PhotoAttachment", "SiteItem", "DrawingRevisionPage", "DrawingRevision", "Drawing", "Discipline", "Area", "UserSectionScope", "User", "Organization", "Section", "Project" CASCADE;`,
+  `TRUNCATE TABLE "IdempotencyRecord", "AuditLog", "ImportJob", "ExportJob", "Notification", "WorkflowLog", "PhotoAttachment", "SiteItem", "Discipline", "Area", "UserSectionScope", "User", "Organization", "Section", "Project" CASCADE;`,
   insert("Project", [store.project]),
   insert("Section", store.sections),
   insert("Organization", store.organizations),
@@ -84,15 +78,6 @@ const seedSql = [
       }))
     )
   ),
-  insert(
-    "Drawing",
-    drawingRows.map((drawing) => ({
-      ...drawing,
-      disciplineId: drawing.disciplineId ?? null
-    }))
-  ),
-  insert("DrawingRevision", revisionRows),
-  insert("DrawingRevisionPage", pageRows),
   insert(
     "SiteItem",
     store.siteItems.map((item) => ({

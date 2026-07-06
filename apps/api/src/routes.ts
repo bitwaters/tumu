@@ -39,8 +39,6 @@ import {
 import type {
   Area,
   Discipline,
-  Drawing,
-  DrawingRevision,
   Organization,
   PhotoAttachment,
   Section,
@@ -212,117 +210,6 @@ export function buildRouter(store: Store, config: ApiConfig): Router {
   registerMasterData(router, store, config, "organizations", store.organizations);
   registerMasterData(router, store, config, "areas", store.areas);
   registerMasterData(router, store, config, "disciplines", store.disciplines);
-
-  router.add("GET", "/drawings", (request) => {
-    authenticate(request, store, config);
-    const { user } = requireContext(request);
-    const areaId = request.query.get("areaId");
-    const disciplineId = request.query.get("disciplineId");
-    const search = request.query.get("search")?.toLowerCase();
-    return store.drawings
-      .filter((drawing) => !areaId || drawing.areaId === areaId)
-      .filter((drawing) => !disciplineId || drawing.disciplineId === disciplineId)
-      .filter((drawing) => !search || `${drawing.name} ${drawing.code}`.toLowerCase().includes(search))
-      .filter((drawing) => canAccessDrawing(user, store, drawing))
-      .map((drawing) => ({ ...drawing, currentRevision: drawing.revisions.find((revision) => revision.isCurrent) }));
-  });
-
-  router.add("POST", "/drawings", (request) => {
-    authenticate(request, store, config);
-    const { user } = requireContext(request);
-    mapForbidden(() => requireAdmin(user));
-    const body = assertRecord(request.body);
-    const drawing: Drawing = {
-      id: newId("drawing"),
-      projectId: store.project.id,
-      areaId: readString(body, "areaId") ?? "",
-      disciplineId: readString(body, "disciplineId", false),
-      name: readString(body, "name") ?? "",
-      code: readString(body, "code") ?? "",
-      isActive: true,
-      revisions: []
-    };
-    store.drawings.push(drawing);
-    writeAudit(store, user.id, "create", "Drawing", drawing.id);
-    return drawing;
-  });
-
-  router.add("PATCH", "/drawings/:id", (request) => {
-    authenticate(request, store, config);
-    const { user } = requireContext(request);
-    mapForbidden(() => requireAdmin(user));
-    const drawing = mustFind(store.drawings, request.params.id, "Drawing");
-    Object.assign(drawing, pickDefined(assertRecord(request.body)));
-    writeAudit(store, user.id, "update", "Drawing", drawing.id);
-    return drawing;
-  });
-
-  router.add("POST", "/drawings/:id/revisions", (request) => {
-    authenticate(request, store, config);
-    const { user } = requireContext(request);
-    mapForbidden(() => requireAdmin(user));
-    const drawing = mustFind(store.drawings, request.params.id, "Drawing");
-    const body = assertRecord(request.body);
-    const pageCount = Number(body.pageCount ?? 1);
-    const revision: DrawingRevision = {
-      id: newId("rev"),
-      drawingId: drawing.id,
-      revisionNo: readString(body, "revisionNo") ?? "A",
-      fileKey: readString(body, "fileKey") ?? `drawings/${drawing.id}.pdf`,
-      coverPreviewKey: readString(body, "coverPreviewKey", false) ?? `drawings/${drawing.id}-p1.png`,
-      pageCount,
-      uploadedBy: user.id,
-      uploadedAt: new Date().toISOString(),
-      isCurrent: Boolean(body.isCurrent),
-      pages: Array.from({ length: pageCount }, (_, index) => ({
-        id: newId("page"),
-        drawingRevisionId: "",
-        pageNumber: index + 1,
-        previewKey: `${drawing.code}-p${index + 1}`,
-        width: 1600,
-        height: 1000
-      }))
-    };
-    revision.pages = revision.pages.map((page) => ({ ...page, drawingRevisionId: revision.id }));
-    if (revision.isCurrent) drawing.revisions.forEach((candidate) => (candidate.isCurrent = false));
-    drawing.revisions.unshift(revision);
-    writeAudit(store, user.id, "upload_revision", "DrawingRevision", revision.id);
-    return revision;
-  });
-
-  router.add("GET", "/drawings/:id/revisions", (request) => {
-    authenticate(request, store, config);
-    const { user } = requireContext(request);
-    const drawing = mustFind(store.drawings, request.params.id, "Drawing");
-    if (!canAccessDrawing(user, store, drawing)) throw notFound("Drawing not found");
-    return drawing.revisions;
-  });
-
-  router.add("GET", "/drawing-revisions/:id/pages", (request) => {
-    authenticate(request, store, config);
-    const { user } = requireContext(request);
-    const { drawing, revision } = mustFindRevision(store, request.params.id);
-    if (!canAccessDrawing(user, store, drawing)) throw notFound("Drawing revision not found");
-    return revision.pages;
-  });
-
-  router.add("GET", "/drawing-revisions/:id/preview", async (request) => {
-    authenticate(request, store, config);
-    const { user } = requireContext(request);
-    const { drawing, revision } = mustFindRevision(store, request.params.id);
-    if (!canAccessDrawing(user, store, drawing)) throw notFound("Drawing revision not found");
-    return storage.createPreviewTarget(revision.coverPreviewKey);
-  });
-
-  router.add("PATCH", "/drawing-revisions/:id/current", (request) => {
-    authenticate(request, store, config);
-    const { user } = requireContext(request);
-    mapForbidden(() => requireAdmin(user));
-    const { drawing, revision } = mustFindRevision(store, request.params.id);
-    drawing.revisions.forEach((candidate) => (candidate.isCurrent = candidate.id === revision.id));
-    writeAudit(store, user.id, "set_current", "DrawingRevision", revision.id);
-    return revision;
-  });
 
   router.add("GET", "/site-items", (request) => {
     authenticate(request, store, config);
@@ -1021,14 +908,6 @@ function mustFind<T extends { id: string }>(collection: T[], id: string, name: s
   return found;
 }
 
-function mustFindRevision(store: Store, id: string): { drawing: Drawing; revision: DrawingRevision } {
-  for (const drawing of store.drawings) {
-    const revision = drawing.revisions.find((candidate) => candidate.id === id);
-    if (revision) return { drawing, revision };
-  }
-  throw notFound("Drawing revision not found");
-}
-
 function validateUser(store: Store, user: User): void {
   if (!["admin", "supervisor", "contractor_manager", "rectifier"].includes(user.role)) throw badRequest("role is invalid");
   if (!store.organizations.some((org) => org.id === user.organizationId && org.isActive)) throw badRequest("organizationId is invalid");
@@ -1055,13 +934,6 @@ function validateResponsibleAssignment(
   if (rectifier.organizationId !== responsibleOrgId) throw badRequest("responsibleUserId must belong to responsibleOrgId");
   if (!canAccessSection(rectifier, item.sectionId)) throw badRequest("responsibleUserId is outside the item section scope");
   return { responsibleOrgId, responsibleUserId };
-}
-
-function canAccessDrawing(user: User, store: Store, drawing: Drawing): boolean {
-  if (user.role === "admin") return true;
-  return visibleItems(user, store).some(
-    (item) => item.areaId === drawing.areaId && (!drawing.disciplineId || item.disciplineId === drawing.disciplineId)
-  );
 }
 
 function filterMasterDataForUser<T extends MutableMaster>(name: string, collection: T[], store: Store, user: User): T[] {

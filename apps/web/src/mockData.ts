@@ -2,7 +2,6 @@ import type {
   Area,
   AuditLog,
   Discipline,
-  Drawing,
   ExportJob,
   ImportJob,
   Notification,
@@ -99,71 +98,6 @@ export const disciplines: Discipline[] = [
   { id: "disc-electric", projectId: project.id, name: "电气", code: "ELE", isActive: true },
   { id: "disc-mech", projectId: project.id, name: "机务", code: "MEC", isActive: true },
   { id: "disc-install", projectId: project.id, name: "安装", code: "INS", isActive: true }
-];
-
-export const drawings: Drawing[] = [
-  {
-    id: "drawing-main-floor",
-    projectId: project.id,
-    areaId: "area-main",
-    name: "主厂房零米层平面图",
-    code: "DWG-MAIN-00",
-    isActive: true,
-    revisions: [
-      {
-        id: "rev-main-a",
-        drawingId: "drawing-main-floor",
-        revisionNo: "A",
-        fileKey: "drawings/main-floor-a.pdf",
-        coverPreviewKey: "drawings/main-floor-a-p1.png",
-        pageCount: 2,
-        uploadedBy: "u-admin",
-        uploadedAt: "2026-06-01T09:00:00Z",
-        isCurrent: false,
-        pages: [
-          { id: "rev-main-a-p1", drawingRevisionId: "rev-main-a", pageNumber: 1, previewKey: "main-a-p1", width: 1600, height: 1000 },
-          { id: "rev-main-a-p2", drawingRevisionId: "rev-main-a", pageNumber: 2, previewKey: "main-a-p2", width: 1600, height: 1000 }
-        ]
-      },
-      {
-        id: "rev-main-b",
-        drawingId: "drawing-main-floor",
-        revisionNo: "B",
-        fileKey: "drawings/main-floor-b.pdf",
-        coverPreviewKey: "drawings/main-floor-b-p1.png",
-        pageCount: 2,
-        uploadedBy: "u-admin",
-        uploadedAt: "2026-06-15T09:00:00Z",
-        isCurrent: true,
-        pages: [
-          { id: "rev-main-b-p1", drawingRevisionId: "rev-main-b", pageNumber: 1, previewKey: "main-b-p1", width: 1600, height: 1000 },
-          { id: "rev-main-b-p2", drawingRevisionId: "rev-main-b", pageNumber: 2, previewKey: "main-b-p2", width: 1600, height: 1000 }
-        ]
-      }
-    ]
-  },
-  {
-    id: "drawing-switchyard",
-    projectId: project.id,
-    areaId: "area-switchyard",
-    name: "升压站设备基础布置图",
-    code: "DWG-SW-01",
-    isActive: true,
-    revisions: [
-      {
-        id: "rev-switch-a",
-        drawingId: "drawing-switchyard",
-        revisionNo: "A",
-        fileKey: "drawings/switchyard-a.png",
-        coverPreviewKey: "drawings/switchyard-a.png",
-        pageCount: 1,
-        uploadedBy: "u-admin",
-        uploadedAt: "2026-06-03T09:00:00Z",
-        isCurrent: true,
-        pages: [{ id: "rev-switch-a-p1", drawingRevisionId: "rev-switch-a", pageNumber: 1, previewKey: "switch-a-p1", width: 1400, height: 900 }]
-      }
-    ]
-  }
 ];
 
 export const siteItems: SiteItem[] = [
@@ -335,6 +269,5 @@ export const importJobs: ImportJob[] = [
 
 export const auditLogs: AuditLog[] = [
   { id: "audit-001", actorId: "u-supervisor", action: "site_item.create", resourceType: "SiteItem", resourceId: "item-001", createdAt: "2026-06-25T08:30:00Z" },
-  { id: "audit-002", actorId: "u-supervisor", action: "site_item.dispatch", resourceType: "SiteItem", resourceId: "item-001", createdAt: "2026-06-25T09:00:00Z" },
-  { id: "audit-003", actorId: "u-admin", action: "drawing.revision_upload", resourceType: "DrawingRevision", resourceId: "rev-main-b", createdAt: "2026-06-15T09:00:00Z" }
+  { id: "audit-002", actorId: "u-supervisor", action: "site_item.dispatch", resourceType: "SiteItem", resourceId: "item-001", createdAt: "2026-06-25T09:00:00Z" }
 ];

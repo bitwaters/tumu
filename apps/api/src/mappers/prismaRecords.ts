@@ -1,7 +1,4 @@
 import type {
-  Drawing,
-  DrawingRevision,
-  DrawingRevisionPage,
   ExportJob,
   ImportJob,
   ImportRowError,
@@ -37,71 +34,6 @@ export function mapUserRecord(record: UserRecordWithScopes): User {
     passwordHash: record.passwordHash,
     sectionScopeIds: record.sectionScopes?.map((scope) => scope.sectionId) ?? []
   };
-}
-
-export interface DrawingPageRecord {
-  id: string;
-  drawingRevisionId: string;
-  pageNumber: number;
-  previewKey: string;
-  width: number;
-  height: number;
-}
-
-export interface DrawingRevisionRecord {
-  id: string;
-  drawingId: string;
-  revisionNo: string;
-  fileKey: string;
-  coverPreviewKey: string;
-  pageCount: number;
-  uploadedBy: string;
-  uploadedAt: Date;
-  isCurrent: boolean;
-  pages?: DrawingPageRecord[];
-}
-
-export interface DrawingRecord {
-  id: string;
-  projectId: string;
-  areaId: string;
-  disciplineId: string | null;
-  name: string;
-  code: string;
-  isActive: boolean;
-  revisions?: DrawingRevisionRecord[];
-}
-
-export function mapDrawingRecord(record: DrawingRecord): Drawing {
-  return {
-    id: record.id,
-    projectId: record.projectId,
-    areaId: record.areaId,
-    disciplineId: record.disciplineId ?? undefined,
-    name: record.name,
-    code: record.code,
-    isActive: record.isActive,
-    revisions: record.revisions?.map(mapDrawingRevisionRecord) ?? []
-  };
-}
-
-export function mapDrawingRevisionRecord(record: DrawingRevisionRecord): DrawingRevision {
-  return {
-    id: record.id,
-    drawingId: record.drawingId,
-    revisionNo: record.revisionNo,
-    fileKey: record.fileKey,
-    coverPreviewKey: record.coverPreviewKey,
-    pageCount: record.pageCount,
-    uploadedBy: record.uploadedBy,
-    uploadedAt: record.uploadedAt.toISOString(),
-    isCurrent: record.isCurrent,
-    pages: record.pages?.map(mapDrawingPageRecord) ?? []
-  };
-}
-
-export function mapDrawingPageRecord(record: DrawingPageRecord): DrawingRevisionPage {
-  return { ...record };
 }
 
 export interface SiteItemRecord {

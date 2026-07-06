@@ -3,10 +3,9 @@ import type { ApiConfig } from "./config.js";
 import { badRequest, forbidden, notFound, unauthorized } from "./errors.js";
 import { assertRecord, readString, readStringArray, Router } from "./http.js";
 import { hashPassword, stableHash, verifyTokenPayload } from "./security.js";
-import { ObjectStorageClient, decodeObjectKey, encodeObjectKey } from "./storage.js";
+import { ObjectStorageClient, decodeObjectKey } from "./storage.js";
 import { AuditRepository } from "./repositories/audit/index.js";
 import { AuthRepository } from "./repositories/auth/index.js";
-import { DrawingsRepository } from "./repositories/drawings/index.js";
 import { IdempotencyRepository } from "./repositories/idempotency/index.js";
 import { MasterDataRepository } from "./repositories/master-data/index.js";
 import { NotificationsRepository } from "./repositories/notifications/index.js";
@@ -18,7 +17,6 @@ import { ImportJobsRepository } from "./repositories/import-jobs/index.js";
 import { UsersRepository } from "./repositories/users/index.js";
 import { AuditService } from "./services/audit/index.js";
 import { AuthService } from "./services/auth/index.js";
-import { DrawingsService } from "./services/drawings/index.js";
 import { IdempotencyService } from "./services/idempotency/index.js";
 import { MasterDataService, type MasterDataKind } from "./services/master-data/index.js";
 import { NotificationsService } from "./services/notifications/index.js";
@@ -60,7 +58,6 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
   const idempotencyService = new IdempotencyService(idempotencyRepository, config);
   const usersService = new UsersService(usersRepository, auditRepository, idempotencyService);
   const masterDataService = new MasterDataService(masterDataRepository, auditRepository);
-  const drawingsService = new DrawingsService(new DrawingsRepository(context), auditRepository);
   const siteItemsService = new SiteItemsService(siteItemsRepository, auditRepository, idempotencyService, notificationsRepository);
   const photosService = new PhotosService(new PhotosRepository(context), storage, config, idempotencyService, auditRepository, systemSettingsService);
   const notificationsService = new NotificationsService(notificationsRepository);
@@ -153,71 +150,6 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
   registerMasterData(router, viewer, masterDataService, "organizations");
   registerMasterData(router, viewer, masterDataService, "areas");
   registerMasterData(router, viewer, masterDataService, "disciplines");
-
-  router.add("GET", "/drawings", async (request) =>
-    drawingsService.list(await viewer(request), {
-      areaId: queryString(request, "areaId"),
-      disciplineId: queryString(request, "disciplineId"),
-      search: queryString(request, "search")
-    })
-  );
-  router.add("POST", "/drawings/upload-target", async (request) => {
-    const actor = await viewer(request);
-    if (actor.role !== "admin") throw forbidden();
-    const body = assertRecord(request.body);
-    const fileName = readString(body, "fileName") ?? "";
-    const mimeType = readString(body, "mimeType") ?? "";
-    const sizeBytes = Number(body.sizeBytes ?? 0);
-    validateDrawingUpload(mimeType, sizeBytes, await systemSettingsService.uploadMaxBytes());
-    const target = storage.createUploadTarget({ actorId: actor.id, fileName, mimeType, sizeBytes });
-    return {
-      ...target,
-      uploadUrl: `/drawings/upload/${encodeObjectKey(target.objectKey)}`,
-      storageProfileId: undefined
-    };
-  });
-  router.add("PUT", "/drawings/upload/:key", async (request) => {
-    const actor = await viewer(request);
-    if (actor.role !== "admin") throw forbidden();
-    const objectKey = decodeObjectKey(request.params.key);
-    if (!objectKey.startsWith(`uploads/${actor.id}/`)) throw badRequest("objectKey does not belong to current user");
-    const contentType = Array.isArray(request.headers["content-type"]) ? request.headers["content-type"][0] : request.headers["content-type"] ?? "application/octet-stream";
-    validateDrawingUpload(contentType, request.rawBuffer.byteLength, await systemSettingsService.uploadMaxBytes());
-    await storage.putObject(objectKey, request.rawBuffer, contentType, await systemSettingsService.objectStorageConfig());
-    return { objectKey };
-  });
-  router.add("POST", "/drawings", async (request) => {
-    const body = assertRecord(request.body);
-    return drawingsService.createDrawing(await viewer(request), {
-      areaId: readString(body, "areaId") ?? "",
-      disciplineId: readString(body, "disciplineId", false),
-      name: readString(body, "name") ?? "",
-      code: readString(body, "code") ?? ""
-    });
-  });
-  router.add("PATCH", "/drawings/:id", async (request) => drawingsService.updateDrawing(await viewer(request), request.params.id, pickDefined(assertRecord(request.body))));
-  router.add("POST", "/drawings/:id/revisions", async (request) => {
-    const body = assertRecord(request.body);
-    return drawingsService.createRevision(await viewer(request), {
-      drawingId: request.params.id,
-      revisionNo: readString(body, "revisionNo") ?? "",
-      fileKey: readString(body, "fileKey") ?? "",
-      coverPreviewKey: readString(body, "coverPreviewKey", false),
-      pageCount: Number(body.pageCount ?? 1),
-      isCurrent: Boolean(body.isCurrent)
-    });
-  });
-  router.add("GET", "/drawings/:id/revisions", async (request) => drawingsService.listRevisions(await viewer(request), request.params.id));
-  router.add("GET", "/drawing-revisions/:id/pages", async (request) => drawingsService.listPages(await viewer(request), request.params.id));
-  router.add("GET", "/drawing-revisions/:id/preview", async (request) => {
-    const previewKey = await drawingsService.previewKey(await viewer(request), request.params.id);
-    try {
-      return { previewUrl: await storage.readObjectDataUrl(previewKey), expiresInSeconds: 900 };
-    } catch {
-      return storage.createPreviewTarget(previewKey);
-    }
-  });
-  router.add("PATCH", "/drawing-revisions/:id/current", async (request) => drawingsService.setCurrentRevision(await viewer(request), request.params.id));
 
   router.add("GET", "/site-items", async (request) =>
     siteItemsService.list(await viewer(request), {
@@ -677,12 +609,6 @@ function readSystemSettingsUpdate(body: Record<string, unknown>): SystemSettings
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function validateDrawingUpload(mimeType: string, sizeBytes: number, maxBytes: number): void {
-  if (!mimeType.startsWith("image/")) throw badRequest("Unsupported MIME type");
-  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) throw badRequest("sizeBytes is invalid");
-  if (sizeBytes > maxBytes) throw badRequest("File is too large");
 }
 
 const siteItemStatuses = ["pending_approval", "dispatched", "rectifying", "pending_acceptance", "closed", "voided"] as const;

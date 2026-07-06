@@ -147,23 +147,6 @@ test("master data read is scoped and writes are admin-only", async () => {
   equal(area.code, "TEMP");
 });
 
-test("drawing APIs enforce admin writes and expose revision previews", async () => {
-  const { request } = createHarness();
-  const adminToken = await login(request, "admin", "local-admin-demo-password");
-  const supervisorToken = await login(request, "wang.supervisor");
-  const installRectifierToken = await login(request, "chen.fix");
-  await rejects(() => request("POST", "/drawings", { areaId: "area-main", name: "临时图", code: "TMP" }, supervisorToken));
-  const drawing = (await request("POST", "/drawings", { areaId: "area-main", disciplineId: "disc-civil", name: "临时图", code: "TMP" }, adminToken)) as { id: string };
-  const revision = (await request("POST", `/drawings/${drawing.id}/revisions`, { revisionNo: "A", fileKey: "drawings/tmp.pdf", pageCount: 2, isCurrent: true }, adminToken)) as { id: string };
-  const pages = (await request("GET", `/drawing-revisions/${revision.id}/pages`, undefined, supervisorToken)) as Array<{ pageNumber: number }>;
-  equal(pages.length, 2);
-  const preview = (await request("GET", `/drawing-revisions/${revision.id}/preview`, undefined, supervisorToken)) as { previewUrl: string };
-  ok(preview.previewUrl.includes("preview=1"));
-  await rejects(() => request("GET", `/drawings/${drawing.id}/revisions`, undefined, installRectifierToken));
-  await rejects(() => request("GET", `/drawing-revisions/${revision.id}/pages`, undefined, installRectifierToken));
-  await rejects(() => request("GET", `/drawing-revisions/${revision.id}/preview`, undefined, installRectifierToken));
-});
-
 test("site item workflow applies role permissions and idempotency", async () => {
   const { store, request } = createHarness();
   const supervisorToken = await login(request, "wang.supervisor");

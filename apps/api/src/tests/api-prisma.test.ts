@@ -149,16 +149,6 @@ if (!databaseUrl) {
     const updatedArea = (await request("PATCH", `/master-data/areas/${createdArea.id}`, { name: "Prisma 临建区更新" }, adminToken)) as { name: string };
     equal(updatedArea.name, "Prisma 临建区更新");
 
-    const drawing = (await request("POST", "/drawings", { areaId: "area-main", disciplineId: "disc-civil", name: "Prisma 临时图", code: "P-TMP" }, adminToken)) as { id: string };
-    const revision = (await request("POST", `/drawings/${drawing.id}/revisions`, { revisionNo: "A", fileKey: "drawings/prisma.pdf", pageCount: 2, isCurrent: true }, adminToken)) as { id: string };
-    const drawingList = (await request("GET", "/drawings?search=P-TMP", undefined, supervisorToken)) as Array<{ currentRevision?: { id: string } }>;
-    equal(drawingList[0]?.currentRevision?.id, revision.id);
-    const pages = (await request("GET", `/drawing-revisions/${revision.id}/pages`, undefined, supervisorToken)) as Array<{ pageNumber: number }>;
-    equal(pages.length, 2);
-    const preview = (await request("GET", `/drawing-revisions/${revision.id}/preview`, undefined, supervisorToken)) as { previewUrl: string };
-    ok(preview.previewUrl.includes("drawings/prisma.pdf"));
-    await rejectsWithStatus(() => request("GET", `/drawing-revisions/${revision.id}/pages`, undefined, installRectifierToken), 404);
-
     const presign = (await request("POST", "/photos/presign", { fileName: "IMG_P_001.jpg", mimeType: "image/jpeg", sizeBytes: 1024 }, supervisorToken)) as { objectKey: string };
     const discoveryPhoto = (await request(
       "POST",

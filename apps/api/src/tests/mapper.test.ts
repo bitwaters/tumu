@@ -5,7 +5,6 @@ import { loadConfig } from "../config.js";
 import { createStore } from "../data.js";
 import {
   groupPhotosByStage,
-  mapDrawingWithCurrentRevision,
   mapPublicUser,
   mapSiteItemDetail,
   mapUserSectionScopeIds
@@ -19,14 +18,6 @@ test("public user mapper keeps section scopes and hides password hash", () => {
   deepEqual(mapUserSectionScopeIds(user), ["sec-civil-a", "sec-install-b"]);
   equal(mapped.username, "wang.supervisor");
   ok(!("passwordHash" in mapped));
-});
-
-test("drawing mapper exposes the current revision without changing drawing shape", () => {
-  const store = createStore();
-  const drawing = mapDrawingWithCurrentRevision(store.drawings[0]!);
-
-  equal(drawing.currentRevision?.id, "rev-main-b");
-  equal(drawing.revisions.length, 1);
 });
 
 test("site item detail mapper groups photos, logs and allowed actions", () => {

@@ -3,7 +3,6 @@ import type {
   Area,
   AuditLog,
   Discipline,
-  Drawing,
   ExportJob,
   ImportJob,
   Notification,
@@ -113,35 +112,6 @@ export const disciplines: Discipline[] = [
   { id: "disc-electric", projectId: project.id, name: "电气", code: "ELE", isActive: true },
   { id: "disc-mech", projectId: project.id, name: "机务", code: "MEC", isActive: true },
   { id: "disc-install", projectId: project.id, name: "安装", code: "INS", isActive: true }
-];
-
-export const drawings: Drawing[] = [
-  {
-    id: "drawing-main-floor",
-    projectId: project.id,
-    areaId: "area-main",
-    disciplineId: "disc-civil",
-    name: "主厂房零米层平面图",
-    code: "DWG-MAIN-00",
-    isActive: true,
-    revisions: [
-      {
-        id: "rev-main-b",
-        drawingId: "drawing-main-floor",
-        revisionNo: "B",
-        fileKey: "drawings/main-floor-b.pdf",
-        coverPreviewKey: "drawings/main-floor-b-p1.png",
-        pageCount: 2,
-        uploadedBy: "u-admin",
-        uploadedAt: "2026-06-15T09:00:00Z",
-        isCurrent: true,
-        pages: [
-          { id: "rev-main-b-p1", drawingRevisionId: "rev-main-b", pageNumber: 1, previewKey: "main-b-p1", width: 1600, height: 1000 },
-          { id: "rev-main-b-p2", drawingRevisionId: "rev-main-b", pageNumber: 2, previewKey: "main-b-p2", width: 1600, height: 1000 }
-        ]
-      }
-    ]
-  }
 ];
 
 export const siteItems: SiteItem[] = [
@@ -311,7 +281,6 @@ export function createStore(): Store {
     users: structuredClone(users),
     areas: structuredClone(areas),
     disciplines: structuredClone(disciplines),
-    drawings: structuredClone(drawings),
     siteItems: structuredClone(siteItems),
     photos: structuredClone(photos),
     workflowLogs: structuredClone(workflowLogs),

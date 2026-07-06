@@ -78,39 +78,6 @@ export interface Discipline {
   isActive: boolean;
 }
 
-export interface DrawingRevisionPage {
-  id: string;
-  drawingRevisionId: string;
-  pageNumber: number;
-  previewKey: string;
-  width: number;
-  height: number;
-}
-
-export interface DrawingRevision {
-  id: string;
-  drawingId: string;
-  revisionNo: string;
-  fileKey: string;
-  coverPreviewKey: string;
-  pageCount: number;
-  uploadedBy: string;
-  uploadedAt: string;
-  isCurrent: boolean;
-  pages: DrawingRevisionPage[];
-}
-
-export interface Drawing {
-  id: string;
-  projectId: string;
-  areaId: string;
-  disciplineId?: string;
-  name: string;
-  code: string;
-  isActive: boolean;
-  revisions: DrawingRevision[];
-}
-
 export interface SiteItem {
   id: string;
   projectId: string;
@@ -246,7 +213,6 @@ export interface Store {
   users: User[];
   areas: Area[];
   disciplines: Discipline[];
-  drawings: Drawing[];
   siteItems: SiteItem[];
   photos: PhotoAttachment[];
   workflowLogs: WorkflowLog[];
