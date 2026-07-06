@@ -1035,6 +1035,101 @@ function useAppState() {
     }
   }
 
+  async function uploadDrawingImage(input: {
+    file: File;
+    name: string;
+    code: string;
+    areaId: string;
+    disciplineId?: string;
+    revisionNo: string;
+    isCurrent: boolean;
+  }): Promise<boolean> {
+    if (!currentUser || currentUser.role !== "admin") return false;
+    const mimeType = input.file.type || "image/jpeg";
+    const sizeBytes = input.file.size;
+    if (!mimeType.startsWith("image/")) {
+      setDataError("请上传图片格式的图纸。");
+      return false;
+    }
+    if (runtimeConfig.useMocks) {
+      const drawingId = uniqueId("drawing");
+      const revisionId = uniqueId("drawing-revision");
+      const pageId = uniqueId("drawing-page");
+      const previewUrl = URL.createObjectURL(input.file);
+      const revision: DrawingRevision = {
+        id: revisionId,
+        drawingId,
+        revisionNo: input.revisionNo,
+        fileKey: `mock/${input.file.name || "drawing.jpg"}`,
+        coverPreviewKey: previewUrl,
+        pageCount: 1,
+        uploadedBy: currentUser.id,
+        uploadedAt: new Date().toISOString(),
+        isCurrent: true,
+        pages: [
+          {
+            id: pageId,
+            drawingRevisionId: revisionId,
+            pageNumber: 1,
+            previewKey: previewUrl,
+            width: 1200,
+            height: 800
+          }
+        ]
+      };
+      setDrawingRecords((prev) => [
+        {
+          id: drawingId,
+          projectId: "project-power-001",
+          areaId: input.areaId,
+          name: input.name,
+          code: input.code,
+          isActive: true,
+          revisions: [revision],
+          currentRevision: revision
+        },
+        ...prev
+      ]);
+      setDrawingPagesByRevision((prev) => ({ ...prev, [revisionId]: revision.pages }));
+      setDrawingPreviewUrls((prev) => ({ ...prev, [revisionId]: previewUrl }));
+      setDataError(null);
+      return true;
+    }
+    try {
+      const target = await drawingsApi.uploadTarget({ fileName: input.file.name || `${input.code}.jpg`, mimeType, sizeBytes });
+      const uploadUrl = target.uploadUrl.startsWith("/") ? `${runtimeConfig.apiBaseUrl}${target.uploadUrl}` : target.uploadUrl;
+      const token = readStoredToken();
+      const response = await fetch(uploadUrl, {
+        method: "PUT",
+        body: input.file,
+        headers: {
+          "Content-Type": mimeType,
+          ...(token ? { authorization: `Bearer ${token}` } : {})
+        }
+      });
+      if (!response.ok) throw new Error("图纸图片上传失败");
+      const drawing = await drawingsApi.create({
+        areaId: input.areaId,
+        disciplineId: input.disciplineId || undefined,
+        name: input.name,
+        code: input.code
+      });
+      await drawingsApi.createRevision(drawing.id, {
+        revisionNo: input.revisionNo,
+        fileKey: target.objectKey,
+        coverPreviewKey: target.objectKey,
+        pageCount: 1,
+        isCurrent: input.isCurrent
+      });
+      await refreshDrawings();
+      setDataError(null);
+      return true;
+    } catch (error) {
+      setDataError(errorMessage(error));
+      return false;
+    }
+  }
+
   const selectItem = useCallback(
     (itemId: string | null) => {
       setSelectedItemId(itemId);
@@ -1688,6 +1783,7 @@ function useAppState() {
     deletePhoto,
     markNotificationRead,
     markAllNotificationsRead,
+    uploadDrawingImage,
     setCurrentDrawingRevision
   };
 }
@@ -3590,6 +3686,7 @@ function SiteItemTable({ items, state, emptyTitle }: { items: SiteItem[]; state:
 function DrawingAdmin({ state, user }: { state: AppState; user: User }) {
   const [search, setSearch] = useState("");
   const [selectedRevision, setSelectedRevision] = useState<DrawingRevision | null>(null);
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
   const drawingsToShow = state.drawingRecords.filter((drawing) => {
     const query = search.trim().toLowerCase();
     if (!query) return true;
@@ -3600,7 +3697,11 @@ function DrawingAdmin({ state, user }: { state: AppState; user: User }) {
   }, [state.refreshDrawings]);
   return (
     <div className="stack">
-      <PageHeader title="图纸管理" meta="区域图纸、版本和预览入口" action={<Button variant="secondary" disabled>上传图纸</Button>} />
+      <PageHeader
+        title="图纸管理"
+        meta="区域图纸、版本和预览入口"
+        action={<Button variant="secondary" disabled={user.role !== "admin"} onClick={() => setIsUploadOpen(true)}>上传图纸</Button>}
+      />
       <div className="filter-grid compact-filters">
         <TextInput value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索图纸名称或编号" />
         <Button variant="secondary" onClick={() => state.refreshDrawings()}>刷新</Button>
@@ -3617,7 +3718,88 @@ function DrawingAdmin({ state, user }: { state: AppState; user: User }) {
         />
       ))}
       {!drawingsToShow.length && state.drawingListState !== "loading" ? <EmptyState title="暂无图纸" description="当前权限范围内没有可查看的图纸。" /> : null}
+      {isUploadOpen ? <DrawingUploadModal state={state} onClose={() => setIsUploadOpen(false)} /> : null}
       {selectedRevision ? <DrawingPreviewModal state={state} revision={selectedRevision} onClose={() => setSelectedRevision(null)} /> : null}
+    </div>
+  );
+}
+
+function DrawingUploadModal({ state, onClose }: { state: AppState; onClose: () => void }) {
+  const areaOptions = directoryAreas(state.directory).filter((area) => area.isActive);
+  const disciplineOptions = directoryDisciplines(state.directory).filter((discipline) => discipline.isActive);
+  const [file, setFile] = useState<File | null>(null);
+  const [values, setValues] = useState({
+    name: "",
+    code: "",
+    areaId: areaOptions[0]?.id || "",
+    disciplineId: disciplineOptions[0]?.id || "",
+    revisionNo: "A",
+    isCurrent: true
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const canSubmit = Boolean(file && values.name.trim() && values.code.trim() && values.areaId && values.revisionNo.trim());
+
+  async function submit() {
+    if (!file || !canSubmit) return;
+    setIsSubmitting(true);
+    const ok = await state.uploadDrawingImage({
+      file,
+      name: values.name.trim(),
+      code: values.code.trim(),
+      areaId: values.areaId,
+      disciplineId: values.disciplineId || undefined,
+      revisionNo: values.revisionNo.trim(),
+      isCurrent: values.isCurrent
+    });
+    setIsSubmitting(false);
+    if (ok) onClose();
+  }
+
+  return (
+    <div className="modal-backdrop">
+      <section className="modal drawing-upload-modal">
+        <PageHeader title="上传图纸" meta="支持图片作为单页图纸版本" action={<Button variant="ghost" onClick={onClose}>关闭</Button>} />
+        <div className="form-grid">
+          <Field label="图纸图片">
+            <input
+              className="input"
+              type="file"
+              accept="image/*"
+              onChange={(event) => setFile(event.target.files?.[0] || null)}
+            />
+            {file ? <p className="muted">{file.name} · {(file.size / 1024 / 1024).toFixed(2)} MB</p> : null}
+          </Field>
+          <Field label="图纸名称">
+            <TextInput value={values.name} onChange={(event) => setValues({ ...values, name: event.target.value })} placeholder="例如：主厂房零米层平面图" />
+          </Field>
+          <Field label="图纸编号">
+            <TextInput value={values.code} onChange={(event) => setValues({ ...values, code: event.target.value })} placeholder="例如：DWG-MAIN-00" />
+          </Field>
+          <Field label="区域">
+            <Select value={values.areaId} onChange={(event) => setValues({ ...values, areaId: event.target.value })}>
+              {areaOptions.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
+            </Select>
+          </Field>
+          <Field label="专业">
+            <Select value={values.disciplineId} onChange={(event) => setValues({ ...values, disciplineId: event.target.value })}>
+              <option value="">不指定</option>
+              {disciplineOptions.map((discipline) => <option key={discipline.id} value={discipline.id}>{discipline.name}</option>)}
+            </Select>
+          </Field>
+          <Field label="版本号">
+            <TextInput value={values.revisionNo} onChange={(event) => setValues({ ...values, revisionNo: event.target.value })} placeholder="例如：A、B、2026-07" />
+          </Field>
+        </div>
+        <label className="checkbox-row">
+          <input type="checkbox" checked={values.isCurrent} onChange={(event) => setValues({ ...values, isCurrent: event.target.checked })} />
+          上传后设为当前版本
+        </label>
+        {state.dataError ? <p className="error-text">{state.dataError}</p> : null}
+        <div className="action-row">
+          <Button variant="secondary" onClick={onClose}>取消</Button>
+          <Button disabled={!canSubmit || isSubmitting} onClick={submit}>{isSubmitting ? "上传中..." : "上传并保存"}</Button>
+        </div>
+      </section>
     </div>
   );
 }
