@@ -74,8 +74,11 @@ import type {
 import { Button, Card, EmptyState, Field, IconButton, MetricCard, PageHeader, Select, SeverityTag, StatusTag, TextArea, TextInput, TimingTag } from "./ui";
 
 type RoleScopedTab<T extends string> = { id: T; label: string; roles?: Array<User["role"]> };
-type MobileRoute = "todo" | "items" | "photo" | "dashboard" | "profile";
-type DesktopRoute = "dashboard" | "todo" | "items" | "photo" | "master" | "users" | "exports" | "audit" | "profile";
+type MobileRoute = "todo" | "items" | "photo" | "profile";
+type DesktopRoute = "workbench" | "photo" | "master" | "exports" | "settings";
+type ItemCenterTab = "todo" | "items" | "dashboard";
+type MasterCenterTab = "directory" | "users";
+type SettingsCenterTab = "settings" | "audit";
 type CreateItemOptions = { requestKey: string; selectedPhotoIds?: string[] };
 type WorkflowOptions = SiteItemWorkflowInput & { userId?: string; organizationId?: string };
 type FilterSelectOption = { value: string; label: string };
@@ -196,20 +199,15 @@ const mobileTabs: Array<RoleScopedTab<MobileRoute> & { icon: string }> = [
   { id: "todo", label: "待办", icon: "□" },
   { id: "items", label: "事项", icon: "≡" },
   { id: "photo", label: "拍照", icon: "+" },
-  { id: "dashboard", label: "看板", icon: "▦", roles: ["admin", "supervisor", "contractor_manager"] },
   { id: "profile", label: "设置", icon: "●" }
 ];
 
 const desktopTabs: Array<RoleScopedTab<DesktopRoute>> = [
-  { id: "dashboard", label: "首页看板" },
-  { id: "todo", label: "待办处理" },
-  { id: "items", label: "事项管理" },
+  { id: "workbench", label: "事项中心" },
   { id: "photo", label: "现场图库" },
   { id: "master", label: "基础数据", roles: ["admin"] },
-  { id: "users", label: "用户与权限", roles: ["admin"] },
   { id: "exports", label: "导入导出", roles: ["admin", "supervisor", "contractor_manager"] },
-  { id: "audit", label: "审计日志", roles: ["admin"] },
-  { id: "profile", label: "设置" }
+  { id: "settings", label: "系统设置" }
 ];
 
 function uniqueId(prefix: string) {
@@ -490,7 +488,10 @@ function useAppState() {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [isCreatingItem, setIsCreatingItem] = useState(false);
   const [mobileRoute, setMobileRoute] = useState<MobileRoute>("todo");
-  const [desktopRoute, setDesktopRoute] = useState<DesktopRoute>("dashboard");
+  const [desktopRoute, setDesktopRoute] = useState<DesktopRoute>("workbench");
+  const [itemCenterTab, setItemCenterTab] = useState<ItemCenterTab>("todo");
+  const [masterCenterTab, setMasterCenterTab] = useState<MasterCenterTab>("directory");
+  const [settingsCenterTab, setSettingsCenterTab] = useState<SettingsCenterTab>("settings");
   const [showNotifications, setShowNotifications] = useState(false);
   const idempotencyKeys = useRef(new Set<string>());
   const apiIdempotencyKeys = useRef(new IdempotencyKeyStore());
@@ -1557,6 +1558,12 @@ function useAppState() {
     setMobileRoute,
     desktopRoute,
     setDesktopRoute,
+    itemCenterTab,
+    setItemCenterTab,
+    masterCenterTab,
+    setMasterCenterTab,
+    settingsCenterTab,
+    setSettingsCenterTab,
     showNotifications,
     setShowNotifications,
     openCreateItem,
@@ -1652,7 +1659,7 @@ function Shell({ state, user }: { state: AppState; user: User }) {
   const mobileNavTabs = visibleMobileTabs(user);
   const activeMobileRoute = mobileNavTabs.some((tab) => tab.id === state.mobileRoute) ? state.mobileRoute : "todo";
   const desktopNavTabs = visibleDesktopTabs(user);
-  const activeDesktopRoute = desktopNavTabs.some((tab) => tab.id === state.desktopRoute) ? state.desktopRoute : "dashboard";
+  const activeDesktopRoute = desktopNavTabs.some((tab) => tab.id === state.desktopRoute) ? state.desktopRoute : "workbench";
   return (
     <div className="app">
       <div className="mobile-shell">
@@ -1739,7 +1746,6 @@ function renderMobileRoute(state: AppState, user: User) {
   if (route === "todo") return <TodoPage state={state} user={user} />;
   if (route === "items") return <ItemListPage state={state} user={user} />;
   if (route === "photo") return <PhotoPage state={state} />;
-  if (route === "dashboard") return <MobileDashboard state={state} user={user} />;
   return <SettingsPage state={state} user={user} />;
 }
 
@@ -1760,16 +1766,86 @@ function renderDesktopRoute(state: AppState, user: User) {
     if (selected) return <ItemDetailPage state={state} user={user} item={selected} />;
   }
   const allowedRoutes = visibleDesktopTabs(user).map((tab) => tab.id);
-  const route = allowedRoutes.includes(state.desktopRoute) ? state.desktopRoute : "dashboard";
-  if (route === "dashboard") return <DesktopDashboard state={state} user={user} />;
-  if (route === "todo") return <DesktopTodo state={state} user={user} />;
-  if (route === "items") return <DesktopItems state={state} user={user} />;
+  const route = allowedRoutes.includes(state.desktopRoute) ? state.desktopRoute : "workbench";
+  if (route === "workbench") return <ItemCenterPage state={state} user={user} />;
   if (route === "photo") return <PhotoPage state={state} />;
-  if (route === "master") return <MasterDataPage state={state} />;
-  if (route === "users") return <UsersPage state={state} />;
+  if (route === "master") return <MasterCenterPage state={state} />;
   if (route === "exports") return <ExportsPage state={state} user={user} />;
-  if (route === "profile") return <SettingsPage state={state} user={user} />;
-  return <AuditPage state={state} />;
+  return <SettingsCenterPage state={state} user={user} />;
+}
+
+function WorkspaceTabs<T extends string>({
+  value,
+  options,
+  onChange
+}: {
+  value: T;
+  options: Array<{ id: T; label: string; meta?: string }>;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="workspace-tabs" role="tablist">
+      {options.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          role="tab"
+          aria-selected={value === option.id}
+          className={value === option.id ? "workspace-tab active" : "workspace-tab"}
+          onClick={() => onChange(option.id)}
+        >
+          <span>{option.label}</span>
+          {option.meta ? <small>{option.meta}</small> : null}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ItemCenterPage({ state, user }: { state: AppState; user: User }) {
+  const options: Array<{ id: ItemCenterTab; label: string; meta: string }> = [
+    { id: "todo", label: "待我处理", meta: "当前角色动作" },
+    { id: "items", label: "全部事项", meta: "台账与筛选" },
+    { id: "dashboard", label: "统计看板", meta: "闭环概览" }
+  ];
+  return (
+    <div className="stack workspace-page">
+      <WorkspaceTabs value={state.itemCenterTab} options={options} onChange={state.setItemCenterTab} />
+      {state.itemCenterTab === "todo" ? <DesktopTodo state={state} user={user} /> : null}
+      {state.itemCenterTab === "items" ? <DesktopItems state={state} user={user} /> : null}
+      {state.itemCenterTab === "dashboard" ? <DesktopDashboard state={state} user={user} /> : null}
+    </div>
+  );
+}
+
+function MasterCenterPage({ state }: { state: AppState }) {
+  const options: Array<{ id: MasterCenterTab; label: string; meta: string }> = [
+    { id: "directory", label: "标段区域专业", meta: "单位与基础目录" },
+    { id: "users", label: "用户权限", meta: "账号和授权" }
+  ];
+  return (
+    <div className="stack workspace-page">
+      <WorkspaceTabs value={state.masterCenterTab} options={options} onChange={state.setMasterCenterTab} />
+      {state.masterCenterTab === "directory" ? <MasterDataPage state={state} /> : <UsersPage state={state} />}
+    </div>
+  );
+}
+
+function SettingsCenterPage({ state, user }: { state: AppState; user: User }) {
+  const options: Array<{ id: SettingsCenterTab; label: string; meta: string }> =
+    user.role === "admin"
+      ? [
+          { id: "settings", label: "个人与系统", meta: "账号、密码、存储" },
+          { id: "audit", label: "审计日志", meta: "操作追溯" }
+        ]
+      : [{ id: "settings", label: "个人设置", meta: "账号和密码" }];
+  const currentTab = options.some((option) => option.id === state.settingsCenterTab) ? state.settingsCenterTab : "settings";
+  return (
+    <div className="stack workspace-page">
+      <WorkspaceTabs value={currentTab} options={options} onChange={state.setSettingsCenterTab} />
+      {currentTab === "audit" && user.role === "admin" ? <AuditPage state={state} /> : <SettingsPage state={state} user={user} />}
+    </div>
+  );
 }
 
 function TodoPage({ state, user }: { state: AppState; user: User }) {
@@ -2786,33 +2862,6 @@ function PhotoPage({ state }: { state: AppState }) {
           onClose={() => setPreviewPhoto(null)}
         />
       ) : null}
-    </div>
-  );
-}
-
-function MobileDashboard({ state, user }: { state: AppState; user: User }) {
-  const [sectionId, setSectionId] = useState("all");
-  const source = scopedItems(state, user).filter((item) => item.status !== "voided").filter((item) => sectionId === "all" || item.sectionId === sectionId);
-  const summary = summarize(source);
-  const byOrg = countBy(source.filter(isOverdue), (item) => organizationName(state.directory, item.responsibleOrgId));
-  return (
-    <div className="stack">
-      <PageHeader title="移动看板" meta="手机端关键数字" />
-      <Select value={sectionId} onChange={(event) => setSectionId(event.target.value)}>
-        <option value="all">全部标段</option>
-        {directorySections(state.directory).map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}
-      </Select>
-      <div className="metric-grid">
-        <MetricCard label="打开" value={summary.open} />
-        <MetricCard label="待复验" value={summary.pendingReview} tone="due" />
-        <MetricCard label="超期" value={summary.overdue} tone="danger" />
-        <MetricCard label="关闭" value={summary.closed} tone="ok" />
-      </div>
-      <Card>
-        <h3>超期排行</h3>
-        {Object.entries(byOrg).map(([name, count]) => <BarRow key={name} label={name} value={count} max={Math.max(...Object.values(byOrg), 1)} />)}
-        {!Object.keys(byOrg).length ? <p className="muted">暂无超期事项。</p> : null}
-      </Card>
     </div>
   );
 }
