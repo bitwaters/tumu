@@ -3519,20 +3519,46 @@ function SiteItemTable({ items, state, emptyTitle }: { items: SiteItem[]; state:
 }
 
 function MasterDataPage({ state }: { state: AppState }) {
+  const [activeKind, setActiveKind] = useState<MasterDataKind>("sections");
+  const categories: Array<{ kind: MasterDataKind; title: string; description: string; records: MasterDataRecord[] }> = [
+    { kind: "sections", title: "标段", description: "施工标段和合同范围", records: state.directory.sections },
+    { kind: "organizations", title: "单位", description: "业主、监理、施工与其他单位", records: state.directory.organizations },
+    { kind: "areas", title: "区域", description: "现场区域、系统或建筑位置", records: state.directory.areas },
+    { kind: "disciplines", title: "专业", description: "土建、电气、安装等专业分类", records: state.directory.disciplines }
+  ];
+  const activeCategory = categories.find((category) => category.kind === activeKind) ?? categories[0];
   useEffect(() => {
     void state.refreshDirectory();
   }, [state.refreshDirectory]);
   return (
     <div className="stack">
-      <PageHeader title="基础数据" meta="标段、单位、区域、专业" action={<Button variant="secondary" disabled>Excel 导入</Button>} />
+      <PageHeader title="基础数据" meta="集中维护标段、单位、区域和专业目录" action={<Button variant="secondary" disabled>Excel 导入</Button>} />
       {state.directoryState === "loading" ? <p className="muted">正在刷新基础数据...</p> : null}
       {state.directoryState === "error" && state.dataError ? <p className="error-text">{state.dataError}</p> : null}
-      <div className="two-col">
-        <MasterDataPanel kind="sections" title="标段" records={state.directory.sections} state={state} />
-        <MasterDataPanel kind="organizations" title="单位" records={state.directory.organizations} state={state} />
-        <MasterDataPanel kind="areas" title="区域" records={state.directory.areas} state={state} />
-        <MasterDataPanel kind="disciplines" title="专业" records={state.directory.disciplines} state={state} />
-      </div>
+      <Card className="master-directory-card">
+        <aside className="master-directory-nav" aria-label="基础数据类型">
+          {categories.map((category) => (
+            <button
+              key={category.kind}
+              type="button"
+              className={category.kind === activeKind ? "active" : ""}
+              onClick={() => setActiveKind(category.kind)}
+            >
+              <strong>{category.title}</strong>
+              <span>{category.description}</span>
+              <i>{category.records.length} 条</i>
+            </button>
+          ))}
+        </aside>
+        <MasterDataPanel
+          key={activeCategory.kind}
+          kind={activeCategory.kind}
+          title={activeCategory.title}
+          description={activeCategory.description}
+          records={activeCategory.records}
+          state={state}
+        />
+      </Card>
     </div>
   );
 }
@@ -3540,20 +3566,25 @@ function MasterDataPage({ state }: { state: AppState }) {
 function MasterDataPanel({
   kind,
   title,
+  description,
   records,
   state
 }: {
   kind: MasterDataKind;
   title: string;
+  description: string;
   records: MasterDataRecord[];
   state: AppState;
 }) {
   const [editing, setEditing] = useState<MasterDataRecord | "new" | null>(null);
   return (
-    <Card>
+    <div className="master-directory-content">
       <div className="card-title-row">
-        <h3>{title}</h3>
-        <Button variant="secondary" onClick={() => setEditing("new")}>新增</Button>
+        <div>
+          <h3>{title}</h3>
+          <p className="muted">{description} · 共 {records.length} 条</p>
+        </div>
+        <Button variant="secondary" onClick={() => setEditing("new")}>新增{title}</Button>
       </div>
       {editing ? (
         <MasterDataForm
@@ -3581,7 +3612,7 @@ function MasterDataPanel({
           </div>
         ])}
       />
-    </Card>
+    </div>
   );
 }
 
