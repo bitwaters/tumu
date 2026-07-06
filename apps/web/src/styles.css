@@ -501,13 +501,65 @@ h4 {
 
 .storage-settings-layout {
   display: grid;
-  gap: 12px;
+  gap: 16px;
+}
+
+.storage-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 10px 0 14px;
+  overflow: hidden;
+  border: 1px solid var(--gray-20);
+  border-radius: 4px;
+  background: var(--gray-20);
+}
+
+.storage-summary-strip > div {
+  min-width: 0;
+  padding: 12px;
+  background: var(--gray-10);
+}
+
+.storage-summary-strip span,
+.storage-panel-head span {
+  display: block;
+  color: var(--gray-70);
+  font-size: 12px;
+}
+
+.storage-summary-strip strong {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .storage-profile-list,
 .storage-profile-editor {
   display: grid;
   gap: 10px;
+}
+
+.storage-profile-panel {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 12px;
+  background: var(--gray-10);
+  border: 1px solid var(--gray-20);
+  border-radius: 4px;
+}
+
+.storage-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--gray-20);
 }
 
 .storage-profile-button {
@@ -547,11 +599,11 @@ h4 {
   color: var(--gray-70);
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .storage-profile-editor {
-  padding: 12px;
+  padding: 16px;
   background: var(--gray-10);
   border: 1px solid var(--gray-20);
   border-radius: 4px;
@@ -1360,7 +1412,7 @@ th {
   }
 
   .storage-settings-layout {
-    grid-template-columns: 260px minmax(0, 1fr);
+    grid-template-columns: 240px minmax(0, 1fr);
     align-items: start;
   }
 

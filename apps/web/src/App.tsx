@@ -3084,8 +3084,28 @@ function SystemSettingsForm({ state }: { state: AppState }) {
         {state.settingsState === "loading" ? <span className="muted">保存中...</span> : null}
       </div>
       <h4>对象存储</h4>
+      {selectedSavedProfile ? (
+        <div className="storage-summary-strip">
+          <div>
+            <span>当前启用</span>
+            <strong>{settings.objectStorage.profiles.find((profile) => profile.id === activeProfileId)?.name ?? selectedSavedProfile.name}</strong>
+          </div>
+          <div>
+            <span>容量状态</span>
+            <strong>{storageUsageText(selectedSavedProfile)}</strong>
+          </div>
+        </div>
+      ) : null}
       <div className="storage-settings-layout">
-        <div className="storage-profile-list">
+        <div className="storage-profile-panel">
+          <div className="storage-panel-head">
+            <div>
+              <strong>存储位置</strong>
+              <span>{profiles.length} 个配置</span>
+            </div>
+            <Button variant="secondary" onClick={addProfile}>新增</Button>
+          </div>
+          <div className="storage-profile-list">
           {profiles.map((profile) => {
             const savedProfile = settings.objectStorage.profiles.find((candidate) => candidate.id === profile.id);
             return (
@@ -3109,7 +3129,7 @@ function SystemSettingsForm({ state }: { state: AppState }) {
             </button>
             );
           })}
-          <Button variant="secondary" onClick={addProfile}>新增存储</Button>
+          </div>
         </div>
         {selectedProfile ? (
           <div className="storage-profile-editor">
