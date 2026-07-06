@@ -612,7 +612,20 @@ function readSystemSettingsUpdate(body: Record<string, unknown>): SystemSettings
           endpoint: typeof objectStorage.endpoint === "string" ? objectStorage.endpoint : undefined,
           bucket: typeof objectStorage.bucket === "string" ? objectStorage.bucket : undefined,
           accessKey: typeof objectStorage.accessKey === "string" ? objectStorage.accessKey : undefined,
-          secretKey: typeof objectStorage.secretKey === "string" ? objectStorage.secretKey : undefined
+          secretKey: typeof objectStorage.secretKey === "string" ? objectStorage.secretKey : undefined,
+          activeProfileId: typeof objectStorage.activeProfileId === "string" ? objectStorage.activeProfileId : undefined,
+          profiles: Array.isArray(objectStorage.profiles)
+            ? objectStorage.profiles.filter(isRecord).map((profile) =>
+                pickDefined({
+                  id: typeof profile.id === "string" ? profile.id : undefined,
+                  name: typeof profile.name === "string" ? profile.name : undefined,
+                  endpoint: typeof profile.endpoint === "string" ? profile.endpoint : undefined,
+                  bucket: typeof profile.bucket === "string" ? profile.bucket : undefined,
+                  accessKey: typeof profile.accessKey === "string" ? profile.accessKey : undefined,
+                  secretKey: typeof profile.secretKey === "string" ? profile.secretKey : undefined
+                })
+              )
+            : undefined
         })
       : undefined,
     uploads: uploads

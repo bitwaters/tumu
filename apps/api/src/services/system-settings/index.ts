@@ -2,9 +2,30 @@ import type { ApiConfig } from "../../config.js";
 import { badRequest, forbidden } from "../../errors.js";
 import type { AuditRepository } from "../../repositories/audit/index.js";
 import type { SystemSettingsRepository } from "../../repositories/system-settings/index.js";
+import { ObjectStorageClient, type ObjectStorageUsageResult } from "../../storage.js";
 import type { User } from "../../types.js";
 
 export interface ObjectStorageRuntimeConfig {
+  endpoint: string;
+  bucket: string;
+  accessKey: string;
+  secretKey: string;
+}
+
+export interface ObjectStorageProfileView {
+  id: string;
+  name: string;
+  endpoint: string;
+  bucket: string;
+  accessKeyConfigured: boolean;
+  secretKeyConfigured: boolean;
+  isActive: boolean;
+  usage: ObjectStorageUsageResult;
+}
+
+interface ObjectStorageProfileRecord {
+  id: string;
+  name: string;
   endpoint: string;
   bucket: string;
   accessKey: string;
@@ -15,6 +36,8 @@ export interface SystemSettingsView {
   objectStorage: {
     endpoint: string;
     bucket: string;
+    activeProfileId: string;
+    profiles: ObjectStorageProfileView[];
     accessKeyConfigured: boolean;
     secretKeyConfigured: boolean;
   };
@@ -33,6 +56,15 @@ export interface SystemSettingsUpdateInput {
     bucket?: string;
     accessKey?: string;
     secretKey?: string;
+    activeProfileId?: string;
+    profiles?: Array<{
+      id?: string;
+      name?: string;
+      endpoint?: string;
+      bucket?: string;
+      accessKey?: string;
+      secretKey?: string;
+    }>;
   };
   uploads?: {
     maxBytes?: number;
@@ -47,6 +79,8 @@ const keys = {
   bucket: "objectStorage.bucket",
   accessKey: "objectStorage.accessKey",
   secretKey: "objectStorage.secretKey",
+  activeProfileId: "objectStorage.activeProfileId",
+  profiles: "objectStorage.profiles",
   uploadMaxBytes: "uploads.maxBytes",
   backupsManagedExternally: "features.backupsManagedExternally"
 } as const;
@@ -68,10 +102,33 @@ export class SystemSettingsService {
     const values: Record<string, string> = {};
     const storage = input.objectStorage;
     if (storage) {
-      if (storage.endpoint !== undefined) values[keys.endpoint] = validateUrl(storage.endpoint, "objectStorage.endpoint");
-      if (storage.bucket !== undefined) values[keys.bucket] = validateRequired(storage.bucket, "objectStorage.bucket");
-      if (storage.accessKey !== undefined && storage.accessKey.trim()) values[keys.accessKey] = storage.accessKey.trim();
-      if (storage.secretKey !== undefined && storage.secretKey.trim()) values[keys.secretKey] = storage.secretKey.trim();
+      const map = await this.repository.map();
+      if (storage.profiles !== undefined) {
+        const existing = this.storedProfiles(map);
+        const profiles = validateProfiles(storage.profiles, existing);
+        if (profiles.length === 0) throw badRequest("objectStorage.profiles must include at least one profile");
+        values[keys.profiles] = JSON.stringify(profiles);
+        values[keys.activeProfileId] = validateActiveProfileId(storage.activeProfileId ?? map[keys.activeProfileId] ?? profiles[0].id, profiles);
+      } else if (storage.endpoint !== undefined || storage.bucket !== undefined || storage.accessKey !== undefined || storage.secretKey !== undefined) {
+        const profiles = this.storedProfiles(map);
+        const activeProfileId = map[keys.activeProfileId] || profiles[0].id;
+        const nextProfiles = profiles.map((profile) =>
+          profile.id === activeProfileId
+            ? {
+                ...profile,
+                endpoint: storage.endpoint !== undefined ? validateUrl(storage.endpoint, "objectStorage.endpoint") : profile.endpoint,
+                bucket: storage.bucket !== undefined ? validateRequired(storage.bucket, "objectStorage.bucket") : profile.bucket,
+                accessKey: storage.accessKey !== undefined && storage.accessKey.trim() ? storage.accessKey.trim() : profile.accessKey,
+                secretKey: storage.secretKey !== undefined && storage.secretKey.trim() ? storage.secretKey.trim() : profile.secretKey
+              }
+            : profile
+        );
+        values[keys.profiles] = JSON.stringify(nextProfiles);
+        values[keys.activeProfileId] = activeProfileId;
+      }
+      if (storage.activeProfileId !== undefined && storage.profiles === undefined) {
+        values[keys.activeProfileId] = validateActiveProfileId(storage.activeProfileId, this.storedProfiles(await this.repository.map()));
+      }
     }
     if (input.uploads?.maxBytes !== undefined) {
       const maxBytes = Number(input.uploads.maxBytes);
@@ -88,7 +145,7 @@ export class SystemSettingsService {
         action: "update_system_settings",
         resourceType: "SystemSetting",
         resourceId: "global",
-        metadata: { keys: Object.keys(values).filter((key) => key !== keys.secretKey) }
+        metadata: { keys: Object.keys(values).filter((key) => !key.includes("secretKey") && key !== keys.profiles) }
       });
     }
     return this.view(viewer);
@@ -96,12 +153,7 @@ export class SystemSettingsService {
 
   async objectStorageConfig(): Promise<ObjectStorageRuntimeConfig> {
     const map = await this.repository.map();
-    return {
-      endpoint: map[keys.endpoint] || this.config.objectStorageEndpoint,
-      bucket: map[keys.bucket] || this.config.objectStorageBucket,
-      accessKey: map[keys.accessKey] || this.config.objectStorageAccessKey,
-      secretKey: map[keys.secretKey] || this.config.objectStorageSecretKey
-    };
+    return this.activeProfile(map);
   }
 
   async uploadMaxBytes(): Promise<number> {
@@ -110,14 +162,31 @@ export class SystemSettingsService {
     return Number.isFinite(configured) && configured > 0 ? configured : this.config.uploadMaxBytes;
   }
 
-  private toView(map: Record<string, string>, viewer: User): SystemSettingsView {
+  private async toView(map: Record<string, string>, viewer: User): Promise<SystemSettingsView> {
     const isAdmin = viewer.role === "admin";
+    const profiles = isAdmin ? this.storedProfiles(map) : [];
+    const activeProfile = isAdmin ? this.activeProfile(map) : undefined;
+    const usageClient = new ObjectStorageClient(this.config);
+    const profileViews = await Promise.all(
+      profiles.map(async (profile) => ({
+        id: profile.id,
+        name: profile.name,
+        endpoint: profile.endpoint,
+        bucket: profile.bucket,
+        accessKeyConfigured: Boolean(profile.accessKey),
+        secretKeyConfigured: Boolean(profile.secretKey),
+        isActive: profile.id === activeProfile?.id,
+        usage: await usageClient.inspectUsage(profile)
+      }))
+    );
     return {
       objectStorage: {
-        endpoint: isAdmin ? map[keys.endpoint] || this.config.objectStorageEndpoint : "",
-        bucket: isAdmin ? map[keys.bucket] || this.config.objectStorageBucket : "",
-        accessKeyConfigured: Boolean(map[keys.accessKey] || this.config.objectStorageAccessKey),
-        secretKeyConfigured: Boolean(map[keys.secretKey] || this.config.objectStorageSecretKey)
+        endpoint: activeProfile?.endpoint ?? "",
+        bucket: activeProfile?.bucket ?? "",
+        activeProfileId: activeProfile?.id ?? "",
+        profiles: profileViews,
+        accessKeyConfigured: Boolean(activeProfile?.accessKey),
+        secretKeyConfigured: Boolean(activeProfile?.secretKey)
       },
       uploads: {
         maxBytes: isAdmin ? Number(map[keys.uploadMaxBytes] || this.config.uploadMaxBytes) : 0
@@ -128,6 +197,83 @@ export class SystemSettingsService {
       }
     };
   }
+
+  private storedProfiles(map: Record<string, string>): ObjectStorageProfileRecord[] {
+    const parsed = parseProfiles(map[keys.profiles]);
+    if (parsed.length) return parsed;
+    return [
+      {
+        id: "default",
+        name: "默认存储",
+        endpoint: map[keys.endpoint] || this.config.objectStorageEndpoint,
+        bucket: map[keys.bucket] || this.config.objectStorageBucket,
+        accessKey: map[keys.accessKey] || this.config.objectStorageAccessKey,
+        secretKey: map[keys.secretKey] || this.config.objectStorageSecretKey
+      }
+    ];
+  }
+
+  private activeProfile(map: Record<string, string>): ObjectStorageProfileRecord {
+    const profiles = this.storedProfiles(map);
+    return profiles.find((profile) => profile.id === map[keys.activeProfileId]) ?? profiles[0];
+  }
+}
+
+function parseProfiles(value?: string): ObjectStorageProfileRecord[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(isProfileRecord)
+      .map((profile) => ({
+        id: profile.id,
+        name: profile.name,
+        endpoint: profile.endpoint,
+        bucket: profile.bucket,
+        accessKey: profile.accessKey,
+        secretKey: profile.secretKey
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function isProfileRecord(value: unknown): value is ObjectStorageProfileRecord {
+  if (!value || typeof value !== "object") return false;
+  const profile = value as Partial<ObjectStorageProfileRecord>;
+  return ["id", "name", "endpoint", "bucket", "accessKey", "secretKey"].every((key) => typeof profile[key as keyof ObjectStorageProfileRecord] === "string");
+}
+
+function validateProfiles(input: NonNullable<SystemSettingsUpdateInput["objectStorage"]>["profiles"], existing: ObjectStorageProfileRecord[]): ObjectStorageProfileRecord[] {
+  const existingById = new Map(existing.map((profile) => [profile.id, profile]));
+  const usedIds = new Set<string>();
+  return (input ?? []).map((profile, index) => {
+    const id = sanitizeProfileId(profile.id || `storage-${index + 1}`);
+    if (usedIds.has(id)) throw badRequest("objectStorage.profile id must be unique");
+    usedIds.add(id);
+    const previous = existingById.get(id);
+    return {
+      id,
+      name: validateRequired(profile.name ?? previous?.name ?? `存储 ${index + 1}`, "objectStorage.profile.name"),
+      endpoint: validateUrl(profile.endpoint ?? previous?.endpoint ?? "", "objectStorage.profile.endpoint"),
+      bucket: validateRequired(profile.bucket ?? previous?.bucket ?? "", "objectStorage.profile.bucket"),
+      accessKey: profile.accessKey?.trim() || previous?.accessKey || "",
+      secretKey: profile.secretKey?.trim() || previous?.secretKey || ""
+    };
+  });
+}
+
+function validateActiveProfileId(id: string, profiles: ObjectStorageProfileRecord[]): string {
+  const trimmed = sanitizeProfileId(id);
+  if (!profiles.some((profile) => profile.id === trimmed)) throw badRequest("objectStorage.activeProfileId must match a profile");
+  return trimmed;
+}
+
+function sanitizeProfileId(value: string): string {
+  const trimmed = value.trim().replace(/[^a-zA-Z0-9_-]/g, "-");
+  if (!trimmed) throw badRequest("objectStorage.profile.id is required");
+  return trimmed;
 }
 
 function validateRequired(value: string, field: string): string {

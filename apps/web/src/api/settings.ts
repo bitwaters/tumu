@@ -4,6 +4,8 @@ export interface SystemSettings {
   objectStorage: {
     endpoint: string;
     bucket: string;
+    activeProfileId: string;
+    profiles: ObjectStorageProfile[];
     accessKeyConfigured: boolean;
     secretKeyConfigured: boolean;
   };
@@ -16,12 +18,38 @@ export interface SystemSettings {
   };
 }
 
+export interface ObjectStorageProfile {
+  id: string;
+  name: string;
+  endpoint: string;
+  bucket: string;
+  accessKeyConfigured: boolean;
+  secretKeyConfigured: boolean;
+  isActive: boolean;
+  usage: {
+    status: "ok" | "error";
+    objectCount?: number;
+    usedBytes?: number;
+    checkedAt: string;
+    message?: string;
+  };
+}
+
 export interface SystemSettingsUpdateInput {
   objectStorage?: {
     endpoint?: string;
     bucket?: string;
     accessKey?: string;
     secretKey?: string;
+    activeProfileId?: string;
+    profiles?: Array<{
+      id?: string;
+      name?: string;
+      endpoint?: string;
+      bucket?: string;
+      accessKey?: string;
+      secretKey?: string;
+    }>;
   };
   uploads?: {
     maxBytes?: number;

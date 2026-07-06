@@ -17,6 +17,14 @@ export interface PresignResult {
   expiresInSeconds: number;
 }
 
+export interface ObjectStorageUsageResult {
+  status: "ok" | "error";
+  objectCount?: number;
+  usedBytes?: number;
+  checkedAt: string;
+  message?: string;
+}
+
 export class ObjectStorageClient {
   constructor(
     private readonly config: ApiConfig,
@@ -80,26 +88,72 @@ export class ObjectStorageClient {
     throw new Error(`Object bucket initialization failed with HTTP ${response.status}: ${await response.text()}`);
   }
 
-  private async s3Fetch(method: "GET" | "PUT", objectKey?: string, body?: Uint8Array, contentType = "application/octet-stream"): Promise<Response> {
-    const runtime = await this.resolveRuntimeConfig();
-    const endpoint = runtime.endpoint.replace(/\/$/, "");
-    const path = objectKey ? `/${runtime.bucket}/${encodeS3Path(objectKey)}` : `/${runtime.bucket}`;
-    const url = `${endpoint}${path}`;
+  async inspectUsage(runtime?: ObjectStorageRuntimeConfig): Promise<ObjectStorageUsageResult> {
+    const targetRuntime = runtime ?? await this.resolveRuntimeConfig();
+    let continuationToken: string | undefined;
+    let objectCount = 0;
+    let usedBytes = 0;
+    const checkedAt = new Date().toISOString();
+    try {
+      for (let page = 0; page < 20; page += 1) {
+        const query = canonicalQuery({
+          "list-type": "2",
+          "max-keys": "1000",
+          ...(continuationToken ? { "continuation-token": continuationToken } : {})
+        });
+        const response = await this.s3Fetch("GET", undefined, undefined, "application/octet-stream", targetRuntime, query);
+        if (!response.ok) {
+          return { status: "error", checkedAt, message: `HTTP ${response.status}: ${await response.text()}` };
+        }
+        const xml = await response.text();
+        const sizes = [...xml.matchAll(/<Size>(\d+)<\/Size>/g)].map((match) => Number(match[1]));
+        objectCount += sizes.length;
+        usedBytes += sizes.reduce((sum, size) => sum + size, 0);
+        if (!/<IsTruncated>true<\/IsTruncated>/i.test(xml)) break;
+        continuationToken = readXmlText(xml, "NextContinuationToken");
+        if (!continuationToken) break;
+      }
+      return { status: "ok", objectCount, usedBytes, checkedAt };
+    } catch (error) {
+      return { status: "error", checkedAt, message: error instanceof Error ? error.message : "Object storage usage check failed" };
+    }
+  }
+
+  private async s3Fetch(
+    method: "GET" | "PUT",
+    objectKey?: string,
+    body?: Uint8Array,
+    contentType = "application/octet-stream",
+    runtime?: ObjectStorageRuntimeConfig,
+    query = ""
+  ): Promise<Response> {
+    const targetRuntime = runtime ?? await this.resolveRuntimeConfig();
+    const endpoint = targetRuntime.endpoint.replace(/\/$/, "");
+    const path = objectKey ? `/${targetRuntime.bucket}/${encodeS3Path(objectKey)}` : `/${targetRuntime.bucket}`;
+    const url = `${endpoint}${path}${query ? `?${query}` : ""}`;
     const payloadHash = sha256Hex(body ?? new Uint8Array());
     const headers = signS3Request({
       method,
       path,
       contentType,
       payloadHash,
+      query,
       host: new URL(endpoint).host,
-      accessKey: runtime.accessKey,
-      secretKey: runtime.secretKey
+      accessKey: targetRuntime.accessKey,
+      secretKey: targetRuntime.secretKey
     });
-    return fetch(url, {
-      method,
-      headers,
-      body: body as BodyInit | undefined
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+    try {
+      return await fetch(url, {
+        method,
+        headers,
+        body: body as BodyInit | undefined,
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   private async resolveRuntimeConfig(): Promise<ObjectStorageRuntimeConfig> {
@@ -117,6 +171,7 @@ export class ObjectStorageClient {
 interface S3SignInput {
   method: string;
   path: string;
+  query?: string;
   contentType: string;
   payloadHash: string;
   host: string;
@@ -153,7 +208,7 @@ function signS3Request(input: S3SignInput): Record<string, string> {
     `x-amz-content-sha256:${input.payloadHash}`,
     `x-amz-date:${amzDate}`
   ].join("\n") + "\n";
-  const canonicalRequest = [input.method, input.path, "", canonicalHeaders, signedHeaders, input.payloadHash].join("\n");
+  const canonicalRequest = [input.method, input.path, input.query ?? "", canonicalHeaders, signedHeaders, input.payloadHash].join("\n");
   const stringToSign = [
     "AWS4-HMAC-SHA256",
     amzDate,
@@ -184,4 +239,16 @@ function hmacHex(key: string | Uint8Array, data: string): string {
 
 function encodeS3Path(objectKey: string): string {
   return objectKey.split("/").map(encodeURIComponent).join("/");
+}
+
+function canonicalQuery(params: Record<string, string>): string {
+  return Object.entries(params)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join("&");
+}
+
+function readXmlText(xml: string, tag: string): string | undefined {
+  const match = new RegExp(`<${tag}>([^<]+)</${tag}>`).exec(xml);
+  return match?.[1];
 }

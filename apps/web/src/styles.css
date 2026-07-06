@@ -499,6 +499,64 @@ h4 {
   grid-column: 1 / -1;
 }
 
+.storage-settings-layout {
+  display: grid;
+  gap: 12px;
+}
+
+.storage-profile-list,
+.storage-profile-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.storage-profile-button {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  padding: 10px;
+  color: var(--black);
+  background: var(--gray-10);
+  border: 1px solid var(--gray-20);
+  border-radius: 4px;
+  text-align: left;
+}
+
+.storage-profile-button.active {
+  border-color: var(--blue);
+  box-shadow: inset 0 0 0 1px var(--blue);
+}
+
+.storage-profile-button span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.storage-profile-button i {
+  flex: 0 0 auto;
+  color: var(--blue);
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.storage-profile-button small {
+  min-width: 0;
+  color: var(--gray-70);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.storage-profile-editor {
+  padding: 12px;
+  background: var(--gray-10);
+  border: 1px solid var(--gray-20);
+  border-radius: 4px;
+}
+
 .password-editor {
   padding: 0;
   border-top: 0;
@@ -1299,6 +1357,11 @@ th {
     position: sticky;
     top: 24px;
     grid-column: 2;
+  }
+
+  .storage-settings-layout {
+    grid-template-columns: 260px minmax(0, 1fr);
+    align-items: start;
   }
 
   .item-detail-page {

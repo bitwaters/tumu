@@ -117,6 +117,23 @@ const defaultSystemSettings: SystemSettings = {
   objectStorage: {
     endpoint: "",
     bucket: "",
+    activeProfileId: "default",
+    profiles: [
+      {
+        id: "default",
+        name: "默认存储",
+        endpoint: "",
+        bucket: "",
+        accessKeyConfigured: false,
+        secretKeyConfigured: false,
+        isActive: true,
+        usage: {
+          status: "error",
+          checkedAt: "",
+          message: "尚未配置对象存储"
+        }
+      }
+    ],
     accessKeyConfigured: false,
     secretKeyConfigured: false
   },
@@ -128,6 +145,53 @@ const defaultSystemSettings: SystemSettings = {
     backupsManagedExternally: true
   }
 };
+
+function mockObjectStorageSettings(
+  previous: SystemSettings["objectStorage"],
+  input: SystemSettingsUpdateInput["objectStorage"]
+): SystemSettings["objectStorage"] {
+  if (!input) return previous;
+  const profiles = input.profiles?.length
+    ? input.profiles.map((profile, index) => {
+        const previousProfile = previous.profiles.find((candidate) => candidate.id === profile.id);
+        return {
+          id: profile.id || `storage-${index + 1}`,
+          name: profile.name || previousProfile?.name || `存储 ${index + 1}`,
+          endpoint: profile.endpoint || previousProfile?.endpoint || "",
+          bucket: profile.bucket || previousProfile?.bucket || "",
+          accessKeyConfigured: Boolean(profile.accessKey || previousProfile?.accessKeyConfigured),
+          secretKeyConfigured: Boolean(profile.secretKey || previousProfile?.secretKeyConfigured),
+          isActive: false,
+          usage: previousProfile?.usage || {
+            status: "error" as const,
+            checkedAt: "",
+            message: "仅真实 API 模式检测容量"
+          }
+        };
+      })
+    : previous.profiles.map((profile) =>
+        profile.id === previous.activeProfileId
+          ? {
+              ...profile,
+              endpoint: input.endpoint ?? profile.endpoint,
+              bucket: input.bucket ?? profile.bucket,
+              accessKeyConfigured: Boolean(input.accessKey || profile.accessKeyConfigured),
+              secretKeyConfigured: Boolean(input.secretKey || profile.secretKeyConfigured)
+            }
+          : profile
+      );
+  const activeProfileId = input.activeProfileId || previous.activeProfileId || profiles[0]?.id || "";
+  const normalized = profiles.map((profile) => ({ ...profile, isActive: profile.id === activeProfileId }));
+  const active = normalized.find((profile) => profile.id === activeProfileId) || normalized[0];
+  return {
+    endpoint: active?.endpoint || "",
+    bucket: active?.bucket || "",
+    activeProfileId: active?.id || "",
+    profiles: normalized,
+    accessKeyConfigured: Boolean(active?.accessKeyConfigured),
+    secretKeyConfigured: Boolean(active?.secretKeyConfigured)
+  };
+}
 
 const mobileTabs: Array<RoleScopedTab<MobileRoute> & { icon: string }> = [
   { id: "todo", label: "待办", icon: "□" },
@@ -277,6 +341,29 @@ function organizationName(directory: DirectoryData, id?: string): string {
 
 function userName(directory: DirectoryData, id?: string): string {
   return directoryItem(directoryUsers(directory), id)?.name ?? getUser(id)?.name ?? "未知用户";
+}
+
+function sectionScopeText(directory: DirectoryData, user: User): string {
+  const activeSections = directorySections(directory).filter((section) => section.isActive);
+  const scopedIds = new Set(user.sectionScopeIds);
+  const scopedSections = activeSections.filter((section) => scopedIds.has(section.id));
+  if (user.role === "admin" || scopedSections.length === activeSections.length) return `全部标段（${activeSections.length} 个）`;
+  return scopedSections.length ? scopedSections.map((section) => section.name).join("、") : "未配置授权标段";
+}
+
+function formatBytes(value?: number): string {
+  if (value === undefined || !Number.isFinite(value)) return "-";
+  if (value >= 1024 * 1024 * 1024) return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${value} B`;
+}
+
+function storageUsageText(profile: SystemSettings["objectStorage"]["profiles"][number]): string {
+  if (profile.usage.status === "ok") {
+    return `${formatBytes(profile.usage.usedBytes)} · ${profile.usage.objectCount ?? 0} 个对象`;
+  }
+  return profile.usage.message || "暂无法检测容量";
 }
 
 function ownerCandidatesForDirectory(directory: DirectoryData, sectionId?: string) {
@@ -535,12 +622,7 @@ function useAppState() {
     async (input: SystemSettingsUpdateInput) => {
       if (runtimeConfig.useMocks) {
         setSystemSettings((prev) => ({
-          objectStorage: {
-            endpoint: input.objectStorage?.endpoint ?? prev.objectStorage.endpoint,
-            bucket: input.objectStorage?.bucket ?? prev.objectStorage.bucket,
-            accessKeyConfigured: Boolean(input.objectStorage?.accessKey || prev.objectStorage.accessKeyConfigured),
-            secretKeyConfigured: Boolean(input.objectStorage?.secretKey || prev.objectStorage.secretKeyConfigured)
-          },
+          objectStorage: mockObjectStorageSettings(prev.objectStorage, input.objectStorage),
           uploads: {
             maxBytes: input.uploads?.maxBytes ?? prev.uploads.maxBytes
           },
@@ -2857,7 +2939,7 @@ function SettingsPage({ state, user }: { state: AppState; user: User }) {
               <div><dt>角色</dt><dd>{roleLabel(user.role)}</dd></div>
               <div><dt>单位</dt><dd>{organizationName(state.directory, user.organizationId)}</dd></div>
               <div><dt>手机号</dt><dd>{user.phone}</dd></div>
-              <div className="wide"><dt>授权标段</dt><dd>{user.sectionScopeIds.map((id) => sectionName(state.directory, id)).join("、")}</dd></div>
+              <div className="wide"><dt>授权标段</dt><dd>{sectionScopeText(state.directory, user)}</dd></div>
             </dl>
           </Card>
           <Card>
@@ -2879,29 +2961,78 @@ function SettingsPage({ state, user }: { state: AppState; user: User }) {
 
 function SystemSettingsForm({ state }: { state: AppState }) {
   const settings = state.systemSettings;
-  const [endpoint, setEndpoint] = useState(settings.objectStorage.endpoint);
-  const [bucket, setBucket] = useState(settings.objectStorage.bucket);
-  const [accessKey, setAccessKey] = useState("");
-  const [secretKey, setSecretKey] = useState("");
+  const [profiles, setProfiles] = useState(() =>
+    settings.objectStorage.profiles.map((profile) => ({
+      id: profile.id,
+      name: profile.name,
+      endpoint: profile.endpoint,
+      bucket: profile.bucket,
+      accessKey: "",
+      secretKey: ""
+    }))
+  );
+  const [activeProfileId, setActiveProfileId] = useState(settings.objectStorage.activeProfileId);
+  const [selectedProfileId, setSelectedProfileId] = useState(settings.objectStorage.activeProfileId || settings.objectStorage.profiles[0]?.id || "");
   const [maxMb, setMaxMb] = useState(String(Math.round(settings.uploads.maxBytes / 1024 / 1024)));
   const [backupsManagedExternally, setBackupsManagedExternally] = useState(settings.features.backupsManagedExternally);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    setEndpoint(settings.objectStorage.endpoint);
-    setBucket(settings.objectStorage.bucket);
+    setProfiles(
+      settings.objectStorage.profiles.map((profile) => ({
+        id: profile.id,
+        name: profile.name,
+        endpoint: profile.endpoint,
+        bucket: profile.bucket,
+        accessKey: "",
+        secretKey: ""
+      }))
+    );
+    setActiveProfileId(settings.objectStorage.activeProfileId);
+    setSelectedProfileId((current) =>
+      settings.objectStorage.profiles.some((profile) => profile.id === current)
+        ? current
+        : settings.objectStorage.activeProfileId || settings.objectStorage.profiles[0]?.id || ""
+    );
     setMaxMb(String(Math.round(settings.uploads.maxBytes / 1024 / 1024)));
     setBackupsManagedExternally(settings.features.backupsManagedExternally);
   }, [settings]);
+
+  const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) || profiles[0];
+  const selectedSavedProfile = settings.objectStorage.profiles.find((profile) => profile.id === selectedProfile?.id);
+
+  function updateProfile(id: string, input: Partial<(typeof profiles)[number]>) {
+    setProfiles((prev) => prev.map((profile) => (profile.id === id ? { ...profile, ...input } : profile)));
+  }
+
+  function addProfile() {
+    const id = uniqueId("storage").replace(/[^a-zA-Z0-9_-]/g, "-");
+    const next = {
+      id,
+      name: `存储 ${profiles.length + 1}`,
+      endpoint: settings.objectStorage.endpoint || "http://minio:9000",
+      bucket: settings.objectStorage.bucket || "site-management",
+      accessKey: "",
+      secretKey: ""
+    };
+    setProfiles((prev) => [...prev, next]);
+    setSelectedProfileId(id);
+  }
+
+  function removeProfile(id: string) {
+    if (profiles.length <= 1) return;
+    const nextProfiles = profiles.filter((profile) => profile.id !== id);
+    setProfiles(nextProfiles);
+    if (selectedProfileId === id) setSelectedProfileId(nextProfiles[0]?.id || "");
+    if (activeProfileId === id) setActiveProfileId(nextProfiles[0]?.id || "");
+  }
 
   async function submit() {
     setSaved(false);
     const ok = await state.saveSystemSettings({
       objectStorage: {
-        endpoint,
-        bucket,
-        accessKey,
-        secretKey
+        activeProfileId: activeProfileId || profiles[0]?.id,
+        profiles
       },
       uploads: {
         maxBytes: Math.max(1, Number(maxMb || 1)) * 1024 * 1024
@@ -2911,8 +3042,7 @@ function SystemSettingsForm({ state }: { state: AppState }) {
       }
     });
     if (ok) {
-      setAccessKey("");
-      setSecretKey("");
+      setProfiles((prev) => prev.map((profile) => ({ ...profile, accessKey: "", secretKey: "" })));
       setSaved(true);
     }
   }
@@ -2927,19 +3057,67 @@ function SystemSettingsForm({ state }: { state: AppState }) {
         {state.settingsState === "loading" ? <span className="muted">保存中...</span> : null}
       </div>
       <h4>对象存储</h4>
-      <div className="form-grid">
-        <Field label="对象存储地址">
-          <TextInput value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="例如：http://minio:9000" />
-        </Field>
-        <Field label="对象存储桶">
-          <TextInput value={bucket} onChange={(event) => setBucket(event.target.value)} placeholder="site-management" />
-        </Field>
-        <Field label="Access Key">
-          <TextInput value={accessKey} onChange={(event) => setAccessKey(event.target.value)} placeholder={settings.objectStorage.accessKeyConfigured ? "已配置，留空则不修改" : "请输入 Access Key"} />
-        </Field>
-        <Field label="Secret Key">
-          <TextInput value={secretKey} type="password" onChange={(event) => setSecretKey(event.target.value)} placeholder={settings.objectStorage.secretKeyConfigured ? "已配置，留空则不修改" : "请输入 Secret Key"} />
-        </Field>
+      <div className="storage-settings-layout">
+        <div className="storage-profile-list">
+          {profiles.map((profile) => {
+            const savedProfile = settings.objectStorage.profiles.find((candidate) => candidate.id === profile.id);
+            return (
+            <button
+              key={profile.id}
+              type="button"
+              className={`storage-profile-button ${profile.id === selectedProfileId ? "active" : ""}`}
+              onClick={() => setSelectedProfileId(profile.id)}
+            >
+              <span>
+                <strong>{profile.name}</strong>
+                {profile.id === activeProfileId ? <i>当前启用</i> : null}
+                {!savedProfile ? <i>未保存</i> : null}
+              </span>
+              <small>{profile.endpoint} / {profile.bucket}</small>
+              {savedProfile ? (
+                <small className={savedProfile.usage.status === "ok" ? "success-text" : "error-text"}>{storageUsageText(savedProfile)}</small>
+              ) : (
+                <small>保存后检测容量</small>
+              )}
+            </button>
+            );
+          })}
+          <Button variant="secondary" onClick={addProfile}>新增存储</Button>
+        </div>
+        {selectedProfile ? (
+          <div className="storage-profile-editor">
+            <div className="card-title-row">
+              <div>
+                <h4>{selectedProfile.name}</h4>
+                <p className="muted">{selectedSavedProfile ? storageUsageText(selectedSavedProfile) : "保存后可检测容量"}</p>
+              </div>
+              <label className="checkbox-row">
+                <input type="radio" checked={activeProfileId === selectedProfile.id} onChange={() => setActiveProfileId(selectedProfile.id)} />
+                启用
+              </label>
+            </div>
+            <div className="form-grid">
+              <Field label="名称">
+                <TextInput value={selectedProfile.name} onChange={(event) => updateProfile(selectedProfile.id, { name: event.target.value })} placeholder="例如：主 MinIO" />
+              </Field>
+              <Field label="对象存储地址">
+                <TextInput value={selectedProfile.endpoint} onChange={(event) => updateProfile(selectedProfile.id, { endpoint: event.target.value })} placeholder="例如：http://minio:9000" />
+              </Field>
+              <Field label="对象存储桶">
+                <TextInput value={selectedProfile.bucket} onChange={(event) => updateProfile(selectedProfile.id, { bucket: event.target.value })} placeholder="site-management" />
+              </Field>
+              <Field label="Access Key">
+                <TextInput value={selectedProfile.accessKey} onChange={(event) => updateProfile(selectedProfile.id, { accessKey: event.target.value })} placeholder={selectedSavedProfile?.accessKeyConfigured ? "已配置，留空则不修改" : "请输入 Access Key"} />
+              </Field>
+              <Field label="Secret Key">
+                <TextInput value={selectedProfile.secretKey} type="password" onChange={(event) => updateProfile(selectedProfile.id, { secretKey: event.target.value })} placeholder={selectedSavedProfile?.secretKeyConfigured ? "已配置，留空则不修改" : "请输入 Secret Key"} />
+              </Field>
+            </div>
+            <div className="action-row">
+              <Button variant="secondary" disabled={profiles.length <= 1} onClick={() => removeProfile(selectedProfile.id)}>删除存储</Button>
+            </div>
+          </div>
+        ) : null}
       </div>
       <h4>上传与运维</h4>
       <div className="form-grid">
@@ -2951,7 +3129,7 @@ function SystemSettingsForm({ state }: { state: AppState }) {
           备份由服务器任务或面板统一管理
         </label>
       </div>
-      <p className="muted">对象存储配置保存后会影响后续照片上传与预览。Secret Key 不会在前端回显。</p>
+      <p className="muted">当前启用的对象存储会影响后续照片上传与预览。Access Key 和 Secret Key 不会在前端回显。</p>
       {saved ? <p className="success-text">设置已保存。</p> : null}
       {state.settingsState === "error" && state.dataError ? <p className="error-text">{state.dataError}</p> : null}
       <div className="action-row">
