@@ -124,6 +124,7 @@ const defaultSystemSettings: SystemSettings = {
         name: "默认存储",
         endpoint: "",
         bucket: "",
+        capacityBytes: undefined,
         accessKeyConfigured: false,
         secretKeyConfigured: false,
         isActive: true,
@@ -159,11 +160,13 @@ function mockObjectStorageSettings(
           name: profile.name || previousProfile?.name || `存储 ${index + 1}`,
           endpoint: profile.endpoint || previousProfile?.endpoint || "",
           bucket: profile.bucket || previousProfile?.bucket || "",
+          capacityBytes: profile.capacityBytes ?? previousProfile?.capacityBytes,
           accessKeyConfigured: Boolean(profile.accessKey || previousProfile?.accessKeyConfigured),
           secretKeyConfigured: Boolean(profile.secretKey || previousProfile?.secretKeyConfigured),
           isActive: false,
           usage: previousProfile?.usage || {
             status: "error" as const,
+            capacityBytes: profile.capacityBytes,
             checkedAt: "",
             message: "仅真实 API 模式检测容量"
           }
@@ -359,9 +362,25 @@ function formatBytes(value?: number): string {
   return `${value} B`;
 }
 
+function bytesToGbInput(value?: number): string {
+  if (value === undefined || !Number.isFinite(value)) return "";
+  return String(Math.round((value / 1024 / 1024 / 1024) * 100) / 100);
+}
+
+function gbInputToBytes(value?: string): number | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  const gb = Number(trimmed);
+  if (!Number.isFinite(gb) || gb < 0) return undefined;
+  return Math.round(gb * 1024 * 1024 * 1024);
+}
+
 function storageUsageText(profile: SystemSettings["objectStorage"]["profiles"][number]): string {
   if (profile.usage.status === "ok") {
-    return `${formatBytes(profile.usage.usedBytes)} · ${profile.usage.objectCount ?? 0} 个对象`;
+    if (profile.usage.capacityBytes !== undefined) {
+      return `剩余 ${formatBytes(profile.usage.remainingBytes)} / 总 ${formatBytes(profile.usage.capacityBytes)} · 已用 ${formatBytes(profile.usage.usedBytes)}`;
+    }
+    return `已用 ${formatBytes(profile.usage.usedBytes)} · ${profile.usage.objectCount ?? 0} 个对象 · 未配置总容量`;
   }
   return profile.usage.message || "暂无法检测容量";
 }
@@ -2967,6 +2986,7 @@ function SystemSettingsForm({ state }: { state: AppState }) {
       name: profile.name,
       endpoint: profile.endpoint,
       bucket: profile.bucket,
+      capacityGb: bytesToGbInput(profile.capacityBytes ?? profile.usage.capacityBytes),
       accessKey: "",
       secretKey: ""
     }))
@@ -2984,6 +3004,7 @@ function SystemSettingsForm({ state }: { state: AppState }) {
         name: profile.name,
         endpoint: profile.endpoint,
         bucket: profile.bucket,
+        capacityGb: bytesToGbInput(profile.capacityBytes ?? profile.usage.capacityBytes),
         accessKey: "",
         secretKey: ""
       }))
@@ -3012,6 +3033,7 @@ function SystemSettingsForm({ state }: { state: AppState }) {
       name: `存储 ${profiles.length + 1}`,
       endpoint: settings.objectStorage.endpoint || "http://minio:9000",
       bucket: settings.objectStorage.bucket || "site-management",
+      capacityGb: "",
       accessKey: "",
       secretKey: ""
     };
@@ -3032,7 +3054,10 @@ function SystemSettingsForm({ state }: { state: AppState }) {
     const ok = await state.saveSystemSettings({
       objectStorage: {
         activeProfileId: activeProfileId || profiles[0]?.id,
-        profiles
+        profiles: profiles.map(({ capacityGb, ...profile }) => ({
+          ...profile,
+          capacityBytes: gbInputToBytes(capacityGb)
+        }))
       },
       uploads: {
         maxBytes: Math.max(1, Number(maxMb || 1)) * 1024 * 1024
@@ -3105,6 +3130,9 @@ function SystemSettingsForm({ state }: { state: AppState }) {
               </Field>
               <Field label="对象存储桶">
                 <TextInput value={selectedProfile.bucket} onChange={(event) => updateProfile(selectedProfile.id, { bucket: event.target.value })} placeholder="site-management" />
+              </Field>
+              <Field label="规划容量 GB">
+                <TextInput value={selectedProfile.capacityGb} type="number" onChange={(event) => updateProfile(selectedProfile.id, { capacityGb: event.target.value })} placeholder="例如：500" />
               </Field>
               <Field label="Access Key">
                 <TextInput value={selectedProfile.accessKey} onChange={(event) => updateProfile(selectedProfile.id, { accessKey: event.target.value })} placeholder={selectedSavedProfile?.accessKeyConfigured ? "已配置，留空则不修改" : "请输入 Access Key"} />

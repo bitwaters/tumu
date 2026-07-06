@@ -21,6 +21,8 @@ export interface ObjectStorageUsageResult {
   status: "ok" | "error";
   objectCount?: number;
   usedBytes?: number;
+  capacityBytes?: number;
+  remainingBytes?: number;
   checkedAt: string;
   message?: string;
 }
@@ -113,7 +115,14 @@ export class ObjectStorageClient {
         continuationToken = readXmlText(xml, "NextContinuationToken");
         if (!continuationToken) break;
       }
-      return { status: "ok", objectCount, usedBytes, checkedAt };
+      return {
+        status: "ok",
+        objectCount,
+        usedBytes,
+        capacityBytes: targetRuntime.capacityBytes,
+        remainingBytes: targetRuntime.capacityBytes === undefined ? undefined : Math.max(targetRuntime.capacityBytes - usedBytes, 0),
+        checkedAt
+      };
     } catch (error) {
       return { status: "error", checkedAt, message: error instanceof Error ? error.message : "Object storage usage check failed" };
     }

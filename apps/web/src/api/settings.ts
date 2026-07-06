@@ -23,6 +23,7 @@ export interface ObjectStorageProfile {
   name: string;
   endpoint: string;
   bucket: string;
+  capacityBytes?: number;
   accessKeyConfigured: boolean;
   secretKeyConfigured: boolean;
   isActive: boolean;
@@ -30,6 +31,8 @@ export interface ObjectStorageProfile {
     status: "ok" | "error";
     objectCount?: number;
     usedBytes?: number;
+    capacityBytes?: number;
+    remainingBytes?: number;
     checkedAt: string;
     message?: string;
   };
@@ -49,6 +52,7 @@ export interface SystemSettingsUpdateInput {
       bucket?: string;
       accessKey?: string;
       secretKey?: string;
+      capacityBytes?: number;
     }>;
   };
   uploads?: {

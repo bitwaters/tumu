@@ -622,7 +622,8 @@ function readSystemSettingsUpdate(body: Record<string, unknown>): SystemSettings
                   endpoint: typeof profile.endpoint === "string" ? profile.endpoint : undefined,
                   bucket: typeof profile.bucket === "string" ? profile.bucket : undefined,
                   accessKey: typeof profile.accessKey === "string" ? profile.accessKey : undefined,
-                  secretKey: typeof profile.secretKey === "string" ? profile.secretKey : undefined
+                  secretKey: typeof profile.secretKey === "string" ? profile.secretKey : undefined,
+                  capacityBytes: typeof profile.capacityBytes === "number" ? profile.capacityBytes : undefined
                 })
               )
             : undefined

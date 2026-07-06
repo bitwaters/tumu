@@ -10,6 +10,7 @@ export interface ObjectStorageRuntimeConfig {
   bucket: string;
   accessKey: string;
   secretKey: string;
+  capacityBytes?: number;
 }
 
 export interface ObjectStorageProfileView {
@@ -17,6 +18,7 @@ export interface ObjectStorageProfileView {
   name: string;
   endpoint: string;
   bucket: string;
+  capacityBytes?: number;
   accessKeyConfigured: boolean;
   secretKeyConfigured: boolean;
   isActive: boolean;
@@ -30,6 +32,7 @@ interface ObjectStorageProfileRecord {
   bucket: string;
   accessKey: string;
   secretKey: string;
+  capacityBytes?: number;
 }
 
 export interface SystemSettingsView {
@@ -64,6 +67,7 @@ export interface SystemSettingsUpdateInput {
       bucket?: string;
       accessKey?: string;
       secretKey?: string;
+      capacityBytes?: number;
     }>;
   };
   uploads?: {
@@ -173,6 +177,7 @@ export class SystemSettingsService {
         name: profile.name,
         endpoint: profile.endpoint,
         bucket: profile.bucket,
+        capacityBytes: profile.capacityBytes,
         accessKeyConfigured: Boolean(profile.accessKey),
         secretKeyConfigured: Boolean(profile.secretKey),
         isActive: profile.id === activeProfile?.id,
@@ -232,7 +237,8 @@ function parseProfiles(value?: string): ObjectStorageProfileRecord[] {
         endpoint: profile.endpoint,
         bucket: profile.bucket,
         accessKey: profile.accessKey,
-        secretKey: profile.secretKey
+        secretKey: profile.secretKey,
+        capacityBytes: profile.capacityBytes
       }));
   } catch {
     return [];
@@ -242,7 +248,10 @@ function parseProfiles(value?: string): ObjectStorageProfileRecord[] {
 function isProfileRecord(value: unknown): value is ObjectStorageProfileRecord {
   if (!value || typeof value !== "object") return false;
   const profile = value as Partial<ObjectStorageProfileRecord>;
-  return ["id", "name", "endpoint", "bucket", "accessKey", "secretKey"].every((key) => typeof profile[key as keyof ObjectStorageProfileRecord] === "string");
+  return (
+    ["id", "name", "endpoint", "bucket", "accessKey", "secretKey"].every((key) => typeof profile[key as keyof ObjectStorageProfileRecord] === "string") &&
+    (profile.capacityBytes === undefined || (typeof profile.capacityBytes === "number" && Number.isFinite(profile.capacityBytes) && profile.capacityBytes >= 0))
+  );
 }
 
 function validateProfiles(input: NonNullable<SystemSettingsUpdateInput["objectStorage"]>["profiles"], existing: ObjectStorageProfileRecord[]): ObjectStorageProfileRecord[] {
@@ -259,7 +268,8 @@ function validateProfiles(input: NonNullable<SystemSettingsUpdateInput["objectSt
       endpoint: validateUrl(profile.endpoint ?? previous?.endpoint ?? "", "objectStorage.profile.endpoint"),
       bucket: validateRequired(profile.bucket ?? previous?.bucket ?? "", "objectStorage.profile.bucket"),
       accessKey: profile.accessKey?.trim() || previous?.accessKey || "",
-      secretKey: profile.secretKey?.trim() || previous?.secretKey || ""
+      secretKey: profile.secretKey?.trim() || previous?.secretKey || "",
+      capacityBytes: validateOptionalCapacity(profile.capacityBytes ?? previous?.capacityBytes)
     };
   });
 }
@@ -274,6 +284,13 @@ function sanitizeProfileId(value: string): string {
   const trimmed = value.trim().replace(/[^a-zA-Z0-9_-]/g, "-");
   if (!trimmed) throw badRequest("objectStorage.profile.id is required");
   return trimmed;
+}
+
+function validateOptionalCapacity(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const capacityBytes = Number(value);
+  if (!Number.isFinite(capacityBytes) || capacityBytes < 0) throw badRequest("objectStorage.profile.capacityBytes must be a non-negative number");
+  return Math.round(capacityBytes);
 }
 
 function validateRequired(value: string, field: string): string {
