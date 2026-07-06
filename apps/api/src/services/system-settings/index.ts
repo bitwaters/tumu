@@ -6,6 +6,7 @@ import { ObjectStorageClient, type ObjectStorageUsageResult } from "../../storag
 import type { User } from "../../types.js";
 
 export interface ObjectStorageRuntimeConfig {
+  id: string;
   endpoint: string;
   bucket: string;
   accessKey: string;
@@ -158,6 +159,15 @@ export class SystemSettingsService {
   async objectStorageConfig(): Promise<ObjectStorageRuntimeConfig> {
     const map = await this.repository.map();
     return this.activeProfile(map);
+  }
+
+  async objectStorageConfigById(profileId?: string): Promise<ObjectStorageRuntimeConfig> {
+    const map = await this.repository.map();
+    if (!profileId) return this.activeProfile(map);
+    const profiles = this.storedProfiles(map);
+    const profile = profiles.find((candidate) => candidate.id === profileId);
+    if (!profile) throw badRequest("objectStorage.profile not found");
+    return profile;
   }
 
   async uploadMaxBytes(): Promise<number> {

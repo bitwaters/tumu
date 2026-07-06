@@ -114,6 +114,7 @@ export interface PhotoAttachment {
   siteItemId?: string;
   stage?: PhotoStage;
   thumbnailKey: string;
+  storageProfileId?: string;
   fileName: string;
   uploadedBy: string;
   uploadedAt: string;
@@ -227,6 +228,7 @@ export interface UploadQueueItem {
   siteItemId?: string;
   file?: File;
   objectKey?: string;
+  storageProfileId?: string;
   mimeType?: string;
   sizeBytes?: number;
   completeRequestKey?: string;

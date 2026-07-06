@@ -21,10 +21,12 @@ export interface PhotoPresignResponse {
   objectKey: string;
   uploadUrl: string;
   expiresInSeconds: number;
+  storageProfileId?: string;
 }
 
 export interface PhotoCompleteInput extends PhotoPresignInput {
   objectKey: string;
+  storageProfileId?: string;
 }
 
 export class PhotosApi {

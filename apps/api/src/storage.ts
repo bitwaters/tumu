@@ -15,6 +15,7 @@ export interface PresignResult {
   objectKey: string;
   uploadUrl: string;
   expiresInSeconds: number;
+  storageProfileId?: string;
 }
 
 export interface ObjectStorageUsageResult {
@@ -38,12 +39,14 @@ export class ObjectStorageClient {
     return `uploads/${input.actorId}/${Date.now()}-${randomUUID()}.${extension}`;
   }
 
-  createUploadTarget(input: PresignInput): PresignResult {
+  createUploadTarget(input: PresignInput, storageProfileId?: string): PresignResult {
     const objectKey = this.createObjectKey(input);
+    const storageQuery = storageProfileId ? `?storageProfileId=${encodeURIComponent(storageProfileId)}` : "";
     return {
       objectKey,
-      uploadUrl: `/photos/upload/${encodeObjectKey(objectKey)}`,
-      expiresInSeconds: 900
+      uploadUrl: `/photos/upload/${encodeObjectKey(objectKey)}${storageQuery}`,
+      expiresInSeconds: 900,
+      storageProfileId
     };
   }
 
@@ -68,24 +71,24 @@ export class ObjectStorageClient {
     return `${endpoint}/${runtime.bucket}/${encodeS3Path(objectKey)}?${query}`;
   }
 
-  async putObject(objectKey: string, body: Uint8Array, contentType: string): Promise<void> {
+  async putObject(objectKey: string, body: Uint8Array, contentType: string, runtime?: ObjectStorageRuntimeConfig): Promise<void> {
     validateObjectKey(objectKey);
-    await this.ensureBucket();
-    const response = await this.s3Fetch("PUT", objectKey, body, contentType);
+    await this.ensureBucket(runtime);
+    const response = await this.s3Fetch("PUT", objectKey, body, contentType, runtime);
     if (!response.ok) throw new Error(`Object upload failed with HTTP ${response.status}: ${await response.text()}`);
   }
 
-  async readObjectDataUrl(objectKey: string): Promise<string> {
+  async readObjectDataUrl(objectKey: string, runtime?: ObjectStorageRuntimeConfig): Promise<string> {
     validateObjectKey(objectKey);
-    const response = await this.s3Fetch("GET", objectKey);
+    const response = await this.s3Fetch("GET", objectKey, undefined, "application/octet-stream", runtime);
     if (!response.ok) throw new Error(`Object preview failed with HTTP ${response.status}: ${await response.text()}`);
     const contentType = response.headers.get("content-type") ?? "application/octet-stream";
     const bytes = new Uint8Array(await response.arrayBuffer());
     return `data:${contentType};base64,${Buffer.from(bytes).toString("base64")}`;
   }
 
-  private async ensureBucket(): Promise<void> {
-    const response = await this.s3Fetch("PUT");
+  private async ensureBucket(runtime?: ObjectStorageRuntimeConfig): Promise<void> {
+    const response = await this.s3Fetch("PUT", undefined, undefined, "application/octet-stream", runtime);
     if (response.ok || response.status === 409) return;
     throw new Error(`Object bucket initialization failed with HTTP ${response.status}: ${await response.text()}`);
   }
@@ -169,6 +172,7 @@ export class ObjectStorageClient {
     return this.runtimeConfig
       ? this.runtimeConfig()
       : {
+          id: "default",
           endpoint: this.config.objectStorageEndpoint,
           bucket: this.config.objectStorageBucket,
           accessKey: this.config.objectStorageAccessKey,

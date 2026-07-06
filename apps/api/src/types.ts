@@ -145,6 +145,7 @@ export interface PhotoAttachment {
   stage?: PhotoStage;
   objectKey: string;
   thumbnailKey: string;
+  storageProfileId?: string;
   fileName: string;
   mimeType: string;
   sizeBytes: number;

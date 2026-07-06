@@ -18,6 +18,7 @@ export interface PhotoPresignInput {
 
 export interface PhotoCompleteInput {
   objectKey?: string;
+  storageProfileId?: string;
   fileName?: string;
   mimeType?: string;
   sizeBytes?: number;
@@ -42,12 +43,13 @@ export class PhotosService {
     const mimeType = input.mimeType ?? "";
     const sizeBytes = Number(input.sizeBytes ?? 0);
     validateUpload(mimeType, sizeBytes, await this.uploadMaxBytes());
+    const storageConfig = await this.storageConfig();
     return this.storage.createUploadTarget({
       actorId: viewer.id,
       fileName,
       mimeType,
       sizeBytes
-    });
+    }, storageConfig.id);
   }
 
   async completeUpload(viewer: User, input: PhotoCompleteInput, idempotency?: Pick<IdempotencyRequest, "key" | "method" | "path">): Promise<PhotoAttachment> {
@@ -66,10 +68,12 @@ export class PhotosService {
         },
         async () => {
           const objectKey = input.objectKey!;
+          const storageProfileId = await this.storageProfileId(input.storageProfileId);
           const fileName = input.fileName ?? objectKey.split("/").at(-1) ?? "photo.jpg";
           const photo = await repository.createUnbound({
             objectKey,
             thumbnailKey: objectKey,
+            storageProfileId,
             fileName,
             mimeType: input.mimeType ?? "image/jpeg",
             sizeBytes: Number(input.sizeBytes ?? 0),
@@ -81,15 +85,16 @@ export class PhotosService {
     });
   }
 
-  async previewObjectKey(viewer: User, photoId: string): Promise<string> {
+  async previewPhoto(viewer: User, photoId: string): Promise<PhotoAttachment> {
     const photo = await this.repository.findPreviewableById(viewer, photoId);
     if (!photo) throw notFound("Photo not found");
-    return photo.objectKey;
+    return photo;
   }
 
   async preview(viewer: User, photoId: string): Promise<{ previewUrl: string; expiresInSeconds: number }> {
+    const photo = await this.previewPhoto(viewer, photoId);
     return {
-      previewUrl: await this.storage.readObjectDataUrl(await this.previewObjectKey(viewer, photoId)),
+      previewUrl: await this.storage.readObjectDataUrl(photo.objectKey, await this.storageConfig(photo.storageProfileId)),
       expiresInSeconds: 900
     };
   }
@@ -127,6 +132,20 @@ export class PhotosService {
 
   private uploadMaxBytes(): Promise<number> {
     return this.settingsService?.uploadMaxBytes() ?? Promise.resolve(this.config.uploadMaxBytes);
+  }
+
+  private storageConfig(profileId?: string) {
+    return this.settingsService?.objectStorageConfigById(profileId) ?? Promise.resolve({
+      id: "default",
+      endpoint: this.config.objectStorageEndpoint,
+      bucket: this.config.objectStorageBucket,
+      accessKey: this.config.objectStorageAccessKey,
+      secretKey: this.config.objectStorageSecretKey
+    });
+  }
+
+  private async storageProfileId(profileId?: string): Promise<string> {
+    return (await this.storageConfig(profileId)).id;
   }
 }
 

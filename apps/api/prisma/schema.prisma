@@ -292,6 +292,7 @@ model PhotoAttachment {
   stage                  PhotoStage?
   objectKey              String      @unique
   thumbnailKey           String
+  storageProfileId       String      @default("default")
   fileName               String
   mimeType               String
   sizeBytes              Int

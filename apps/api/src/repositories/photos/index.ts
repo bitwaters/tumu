@@ -12,6 +12,7 @@ export interface PhotoListFilters {
 export interface CreateUnboundPhotoInput {
   objectKey: string;
   thumbnailKey: string;
+  storageProfileId: string;
   fileName: string;
   mimeType: string;
   sizeBytes: number;

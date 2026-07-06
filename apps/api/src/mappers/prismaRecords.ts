@@ -140,6 +140,7 @@ export interface PhotoAttachmentRecord {
   stage: PhotoAttachment["stage"] | null;
   objectKey: string;
   thumbnailKey: string;
+  storageProfileId: string;
   fileName: string;
   mimeType: string;
   sizeBytes: number;
@@ -200,6 +201,7 @@ export function mapPhotoAttachmentRecord(record: PhotoAttachmentRecord): PhotoAt
     stage: record.stage ?? undefined,
     objectKey: record.objectKey,
     thumbnailKey: record.thumbnailKey,
+    storageProfileId: record.storageProfileId,
     fileName: record.fileName,
     mimeType: record.mimeType,
     sizeBytes: record.sizeBytes,

@@ -222,9 +222,10 @@ export function buildPrismaRouter(prisma: PrismaClient, config: ApiConfig): Rout
     const actor = await viewer(request);
     const objectKey = decodeObjectKey(request.params.key);
     if (!objectKey.startsWith(`uploads/${actor.id}/`)) throw badRequest("objectKey does not belong to current user");
+    const storageProfileId = queryString(request, "storageProfileId");
     const contentType = Array.isArray(request.headers["content-type"]) ? request.headers["content-type"][0] : request.headers["content-type"] ?? "application/octet-stream";
-    await storage.putObject(objectKey, request.rawBuffer, contentType);
-    return { objectKey };
+    await storage.putObject(objectKey, request.rawBuffer, contentType, await systemSettingsService.objectStorageConfigById(storageProfileId));
+    return { objectKey, storageProfileId: storageProfileId ?? (await systemSettingsService.objectStorageConfig()).id };
   });
   router.add("POST", "/photos/complete", async (request) =>
     photosService.completeUpload(await viewer(request), pickDefined(assertRecord(request.body)), idempotencyRequest(request))

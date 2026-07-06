@@ -1493,11 +1493,13 @@ function useAppState() {
     const mimeType = upload.mimeType || upload.file?.type || "image/jpeg";
     const sizeBytes = upload.sizeBytes ?? upload.file?.size ?? 0;
     let objectKey = upload.objectKey;
+    let storageProfileId = upload.storageProfileId;
     if (!objectKey) {
       if (!upload.file) throw new Error("缺少可上传的照片文件");
       const presign = await photosApi.presign({ fileName: upload.fileName, mimeType, sizeBytes });
       objectKey = presign.objectKey;
-      setUploadQueue((prev) => prev.map((item) => (item.id === upload.id ? { ...item, objectKey } : item)));
+      storageProfileId = presign.storageProfileId;
+      setUploadQueue((prev) => prev.map((item) => (item.id === upload.id ? { ...item, objectKey, storageProfileId } : item)));
       const uploadUrl = presign.uploadUrl.startsWith("/") ? `${runtimeConfig.apiBaseUrl}${presign.uploadUrl}` : presign.uploadUrl;
       const token = readStoredToken();
       const response = await fetch(uploadUrl, {
@@ -1510,7 +1512,7 @@ function useAppState() {
       });
       if (!response.ok) throw new Error("对象存储上传失败");
     }
-    const completeInput: PhotoCompleteInput = { objectKey, fileName: upload.fileName, mimeType, sizeBytes };
+    const completeInput: PhotoCompleteInput = { objectKey, storageProfileId, fileName: upload.fileName, mimeType, sizeBytes };
     const key = apiIdempotencyKeys.current.get(upload.completeRequestKey || upload.id, "photo-complete");
     return photosApi.complete(completeInput, key);
   }

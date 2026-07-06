@@ -23,6 +23,7 @@ const viewer: User = {
 
 test("object storage links use runtime endpoint and bucket settings", async () => {
   const storage = new ObjectStorageClient(loadConfig(), async () => ({
+    id: "runtime",
     endpoint: "http://runtime-minio:9000",
     bucket: "runtime-bucket",
     accessKey: "runtime-access-key",
@@ -52,6 +53,50 @@ test("photo complete upload replays idempotent response without duplicate record
   equal(first.id, second.id);
   equal(state.photos.length, 1);
   equal(state.idempotencyRecords.length, 1);
+});
+
+test("photo upload stores the selected object storage profile", async () => {
+  const state = createPhotoPrismaState();
+  const config = loadConfig();
+  const prisma = createPhotoPrismaStub(state);
+  const service = new PhotosService(
+    new PhotosRepository({ prisma }),
+    new ObjectStorageClient(config),
+    config,
+    new IdempotencyService(new IdempotencyRepository({ prisma }), config),
+    new AuditRepository({ prisma }),
+    {
+      uploadMaxBytes: async () => config.uploadMaxBytes,
+      objectStorageConfigById: async (profileId?: string) => ({
+        id: profileId ?? "primary",
+        endpoint: "http://runtime-minio:9000",
+        bucket: "runtime-bucket",
+        accessKey: "runtime-access-key",
+        secretKey: "runtime-secret-key"
+      }),
+      objectStorageConfig: async () => ({
+        id: "primary",
+        endpoint: "http://runtime-minio:9000",
+        bucket: "runtime-bucket",
+        accessKey: "runtime-access-key",
+        secretKey: "runtime-secret-key"
+      })
+    } as never
+  );
+
+  const presign = await service.presign(viewer, { fileName: "IMG_001.jpg", mimeType: "image/jpeg", sizeBytes: 1024 });
+  equal(presign.storageProfileId, "primary");
+
+  const photo = await service.completeUpload(viewer, {
+    objectKey: presign.objectKey,
+    storageProfileId: "archive",
+    fileName: "IMG_001.jpg",
+    mimeType: "image/jpeg",
+    sizeBytes: 1024
+  });
+
+  equal(photo.storageProfileId, "archive");
+  equal(state.photos[0]?.storageProfileId, "archive");
 });
 
 test("photo complete upload rejects mismatched idempotent retries without applying mutations", async () => {
@@ -165,6 +210,7 @@ interface PhotoRecordStub {
   stage: PhotoAttachment["stage"] | null;
   objectKey: string;
   thumbnailKey: string;
+  storageProfileId: string;
   fileName: string;
   mimeType: string;
   sizeBytes: number;
@@ -299,6 +345,7 @@ function createPhotoPrismaStub(state: PhotoPrismaState) {
 interface CreatePhotoDataStub {
   objectKey: string;
   thumbnailKey: string;
+  storageProfileId?: string;
   fileName: string;
   mimeType: string;
   sizeBytes: number;
@@ -326,6 +373,7 @@ function createPhotoRecord(input: Partial<CreatePhotoDataStub> & { id: string; o
     stage: null,
     objectKey: input.objectKey,
     thumbnailKey: input.thumbnailKey ?? input.objectKey,
+    storageProfileId: input.storageProfileId ?? "default",
     fileName: input.fileName ?? input.objectKey.split("/").at(-1) ?? "photo.jpg",
     mimeType: input.mimeType ?? "image/jpeg",
     sizeBytes: input.sizeBytes ?? 1024,
