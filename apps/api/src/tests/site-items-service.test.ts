@@ -115,6 +115,33 @@ test("site item workflow binds photos and writes notifications, workflow logs an
   equal(state.auditLogs.map((log) => log.action).join(","), "submit_review,close");
 });
 
+test("site item workflow rejects voiding an already voided item", async () => {
+  const item = createItem({
+    id: "item-voided",
+    status: "voided",
+    ownerUserId: supervisor.id,
+    responsibleOrgId: rectifier.organizationId,
+    responsibleUserId: rectifier.id,
+    voidedAt: "2026-06-25T08:34:00.000Z"
+  });
+  const state = createSiteItemState({ items: [item] });
+  const service = createSiteItemsService(state);
+
+  await rejects(() =>
+    service.transition(
+      supervisor,
+      item.id,
+      "void",
+      {},
+      { method: "POST", path: "/site-items/item-voided/void", key: "void-again" }
+    )
+  );
+
+  equal(state.items[0]?.status, "voided");
+  equal(state.workflowLogs.length, 0);
+  equal(state.auditLogs.length, 0);
+});
+
 interface SiteItemState {
   items: SiteItem[];
   photos: PhotoAttachment[];

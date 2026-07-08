@@ -153,7 +153,7 @@ export function createHttpServer(router: Router, config: ApiConfig) {
   });
 }
 
-function handleError(response: ServerResponse, error: unknown, corsAllowedOrigin: string): void {
+export function handleError(response: ServerResponse, error: unknown, corsAllowedOrigin: string): void {
   if (error instanceof HttpError) {
     writeJson(response, error.status, { error: { message: error.message, details: error.details ?? null } }, corsAllowedOrigin);
     return;
@@ -166,7 +166,8 @@ function handleError(response: ServerResponse, error: unknown, corsAllowedOrigin
     writeJson(response, 401, { error: { message: "Unauthorized" } }, corsAllowedOrigin);
     return;
   }
-  writeJson(response, 500, { error: { message: error instanceof Error ? error.message : "Internal server error" } }, corsAllowedOrigin);
+  console.error(error);
+  writeJson(response, 500, { error: { message: "Internal server error" } }, corsAllowedOrigin);
 }
 
 type JsonResponseTarget = Pick<ServerResponse, "setHeader" | "end"> & { statusCode: number };

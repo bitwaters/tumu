@@ -721,7 +721,7 @@ async function workflow(request: Parameters<Router["add"]>[2] extends (request: 
       toStatus = "rectifying";
       notify(store, item.responsibleUserId, item, "assigned", "退回重新整改", item.title);
     } else if (action === "void") {
-      if (!canWorkflowOwner(user, item) || item.status === "closed") throw forbidden();
+      if (!canWorkflowOwner(user, item) || item.status === "closed" || item.status === "voided") throw forbidden();
       item.voidedAt = new Date().toISOString();
       toStatus = "voided";
       notify(store, item.responsibleUserId, item, "voided", "事项已作废", item.title);

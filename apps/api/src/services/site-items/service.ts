@@ -445,7 +445,7 @@ async function resolveWorkflowUpdate(
   }
 
   if (action === "void") {
-    if (!canWorkflowOwner(viewer, item) || item.status === "closed") throw forbidden();
+    if (!canWorkflowOwner(viewer, item) || item.status === "closed" || item.status === "voided") throw forbidden();
     return {
       update: { status: "voided", voidedAt: new Date() },
       notification: {

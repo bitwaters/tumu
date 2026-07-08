@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { deepEqual, equal } from "node:assert/strict";
 import type { ServerResponse } from "node:http";
-import { setCorsHeaders, writeJson } from "../http.js";
+import { handleError, setCorsHeaders, writeJson } from "../http.js";
 
 test("http helpers use configured CORS origin", () => {
   const response = createResponseStub();
@@ -22,6 +22,21 @@ test("writeJson preserves configured CORS origin", () => {
   equal(response.headers.get("access-control-allow-origin"), "https://power-site.example");
   equal(response.headers.get("content-type"), "application/json; charset=utf-8");
   deepEqual(JSON.parse(response.body), { ok: true });
+});
+
+test("server hides unexpected error details from clients", () => {
+  const response = createResponseStub();
+  const originalError = console.error;
+  console.error = () => undefined;
+  try {
+    handleError(response as unknown as ServerResponse, new Error("database password leaked in stack"), "https://power-site.example");
+
+    equal(response.statusCode, 500);
+    equal(response.headers.get("access-control-allow-origin"), "https://power-site.example");
+    deepEqual(JSON.parse(response.body), { error: { message: "Internal server error" } });
+  } finally {
+    console.error = originalError;
+  }
 });
 
 function createResponseStub(): Pick<ServerResponse, "setHeader" | "end"> & { statusCode: number; headers: Map<string, string>; body: string } {

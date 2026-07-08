@@ -1,4 +1,4 @@
-import type { ApiClient } from "./client";
+import type { ApiClient } from "./client.js";
 
 export interface SystemSettings {
   objectStorage: {

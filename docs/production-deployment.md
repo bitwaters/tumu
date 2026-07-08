@@ -209,4 +209,5 @@ npm run prod:smoke
 - 不要在生产库上执行 `db:seed`、`test:db:reset` 或任何 reset 类命令。
 - `.env.production` 不应提交到 Git。
 - `JWT_SECRET` 更换会让已有登录会话失效。
+- `JWT_TTL_HOURS` 控制登录 token 有效期，默认 12 小时；缩短会话时间会提升安全性，但用户需要更频繁登录。
 - `PUBLIC_API_BASE_URL` 是前端生产构建时使用的 API 地址，变更后需要重新构建 Web 镜像。

@@ -32,6 +32,14 @@ test("site item detail mapper groups photos, logs and allowed actions", () => {
   deepEqual(detail.allowedActions, allowedWorkflowActions(viewer, item));
 });
 
+test("voided site items can be reopened but not voided again", () => {
+  const store = createStore();
+  const viewer = store.users.find((candidate) => candidate.id === "u-supervisor")!;
+  const item = store.siteItems.find((candidate) => candidate.status === "voided")!;
+
+  deepEqual(allowedWorkflowActions(viewer, item), ["comment", "reopen"]);
+});
+
 test("photo grouping ignores unrelated stages", () => {
   const store = createStore();
   const grouped = groupPhotosByStage(store.photos);

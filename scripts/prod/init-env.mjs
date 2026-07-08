@@ -126,6 +126,7 @@ export function buildEnv(options) {
     `MINIO_CONSOLE_HOST_PORT=${options.minioConsoleHostPort}`,
     "",
     `JWT_SECRET=${secret(48)}`,
+    "JWT_TTL_HOURS=12",
     `UPLOAD_MAX_BYTES=${options.uploadMaxBytes}`,
     `IDEMPOTENCY_TTL_HOURS=${options.idempotencyTtlHours}`,
     `SEED_DEMO_PASSWORD=${secret(24)}`,

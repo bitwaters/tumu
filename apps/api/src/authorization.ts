@@ -59,7 +59,7 @@ export function allowedWorkflowActions(user: User, item: SiteItem): WorkflowActi
   if (item.responsibleUserId === user.id && item.status === "dispatched") actions.push("start_rectify");
   if (item.responsibleUserId === user.id && item.status === "rectifying") actions.push("submit_review");
   if (canWorkflowOwner(user, item) && item.status === "pending_acceptance") actions.push("return_rectification", "close");
-  if (canWorkflowOwner(user, item) && item.status !== "closed") actions.push("void");
+  if (canWorkflowOwner(user, item) && item.status !== "closed" && item.status !== "voided") actions.push("void");
   if (canWorkflowOwner(user, item) && (item.status === "closed" || item.status === "voided")) actions.push("reopen");
   return actions;
 }

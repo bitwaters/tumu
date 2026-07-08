@@ -52,7 +52,7 @@ VITE_USE_MOCKS=true npm run dev:web
 - API 运行模式：`API_RUNTIME=prisma|memory`，当前默认 `prisma`；`memory` 仅保留为旧内存路由的显式调试/参考模式
 - Redis：`REDIS_URL`
 - MinIO/S3：`S3_ENDPOINT`、`S3_BUCKET`、`S3_ACCESS_KEY`、`S3_SECRET_KEY`
-- 认证与上传限制：`JWT_SECRET`、`UPLOAD_MAX_BYTES`、`IDEMPOTENCY_TTL_HOURS`
+- 认证与上传限制：`JWT_SECRET`、`JWT_TTL_HOURS`、`UPLOAD_MAX_BYTES`、`IDEMPOTENCY_TTL_HOURS`
 
 ## 数据库
 
