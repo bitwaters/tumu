@@ -195,11 +195,11 @@ function mockObjectStorageSettings(
   };
 }
 
-const mobileTabs: Array<RoleScopedTab<MobileRoute> & { icon: string }> = [
-  { id: "todo", label: "待办", icon: "□" },
-  { id: "items", label: "事项", icon: "≡" },
-  { id: "photo", label: "拍照", icon: "+" },
-  { id: "profile", label: "设置", icon: "●" }
+const mobileTabs: Array<RoleScopedTab<MobileRoute> & { icon: MobileRoute }> = [
+  { id: "todo", label: "待办", icon: "todo" },
+  { id: "items", label: "事项", icon: "items" },
+  { id: "photo", label: "拍照", icon: "photo" },
+  { id: "profile", label: "设置", icon: "profile" }
 ];
 
 const desktopTabs: Array<RoleScopedTab<DesktopRoute>> = [
@@ -1685,7 +1685,7 @@ function Shell({ state, user }: { state: AppState; user: User }) {
                 state.setMobileRoute(tab.id);
               }}
             >
-              <span>{tab.icon}</span>
+              <span className={`nav-icon nav-icon-${tab.icon}`} aria-hidden="true" />
               {tab.label}
               {tab.id === "profile" && unreadCount ? <i className="nav-dot" /> : null}
             </button>

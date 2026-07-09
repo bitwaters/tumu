@@ -165,8 +165,8 @@ h4 {
 .bottom-nav {
   z-index: 20;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  height: 64px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  height: 70px;
   background: var(--white);
   border-top: 1px solid var(--gray-20);
 }
@@ -174,17 +174,91 @@ h4 {
 .bottom-nav button {
   position: relative;
   display: grid;
+  grid-template-rows: 24px 18px;
   place-items: center;
-  gap: 2px;
+  align-content: center;
+  gap: 4px;
+  min-width: 0;
   border: 0;
   background: transparent;
   color: var(--gray-70);
   font-size: 12px;
+  line-height: 1;
 }
 
 .bottom-nav button.active {
   color: var(--blue);
   font-weight: 700;
+}
+
+.nav-icon {
+  position: relative;
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  color: currentColor;
+}
+
+.nav-icon::before,
+.nav-icon::after {
+  position: absolute;
+  content: "";
+  box-sizing: border-box;
+}
+
+.nav-icon-todo::before {
+  left: 5px;
+  top: 5px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+}
+
+.nav-icon-items::before {
+  left: 5px;
+  top: 6px;
+  width: 12px;
+  height: 2px;
+  background: currentColor;
+  box-shadow: 0 5px 0 currentColor, 0 10px 0 currentColor;
+}
+
+.nav-icon-photo::before,
+.nav-icon-photo::after {
+  background: currentColor;
+}
+
+.nav-icon-photo::before {
+  left: 10px;
+  top: 4px;
+  width: 2px;
+  height: 14px;
+}
+
+.nav-icon-photo::after {
+  left: 4px;
+  top: 10px;
+  width: 14px;
+  height: 2px;
+}
+
+.nav-icon-profile::before {
+  left: 8px;
+  top: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.nav-icon-profile::after {
+  left: 4px;
+  top: 12px;
+  width: 14px;
+  height: 7px;
+  border: 2px solid currentColor;
+  border-bottom: 0;
+  border-radius: 999px 999px 0 0;
 }
 
 .nav-dot,
@@ -195,8 +269,8 @@ h4 {
 
 .nav-dot {
   position: absolute;
-  right: 26%;
-  top: 8px;
+  right: calc(50% - 18px);
+  top: 11px;
   width: 7px;
   height: 7px;
   border-radius: 999px;
