@@ -17,10 +17,15 @@ import type {
 } from "./types.js";
 import { hashPassword } from "./security.js";
 
-function demoPassword(kind: "admin" | "user"): string {
-  const sharedPassword = process.env.SEED_DEMO_PASSWORD;
-  const specificPassword = kind === "admin" ? process.env.SEED_ADMIN_PASSWORD : process.env.SEED_USER_PASSWORD;
+export function demoPassword(kind: "admin" | "user"): string {
+  const sharedPassword = readSeedPassword("SEED_DEMO_PASSWORD");
+  const specificPassword = kind === "admin" ? readSeedPassword("SEED_ADMIN_PASSWORD") : readSeedPassword("SEED_USER_PASSWORD");
   return specificPassword ?? sharedPassword ?? (kind === "admin" ? "local-admin-demo-password" : "local-user-demo-password");
+}
+
+function readSeedPassword(name: "SEED_DEMO_PASSWORD" | "SEED_ADMIN_PASSWORD" | "SEED_USER_PASSWORD"): string | undefined {
+  const value = process.env[name]?.trim();
+  return value ? value : undefined;
 }
 
 export const project: Project = {
